@@ -40,7 +40,16 @@ them in. See [HANDOFF.md](HANDOFF.md) for acceptance criteria per tool.
   (typecheck/build matrix on Linux/Win/macOS + lint/format on Linux).
 - Project docs: CLAUDE.md, STATUS.md, README.md, HANDOFF.md.
 - Public GitHub repo at [CarlDog/filesystem-mcp](https://github.com/CarlDog/filesystem-mcp).
-  Initial scaffold + .gitattributes pushed; CI workflows triggered.
+  Initial scaffold + .gitattributes pushed; CI workflows green.
+- Deployed as Portainer git stack (#152) on `your-nas` endpoint 2,
+  pulling from `refs/heads/main`. Image:
+  `ghcr.io/carldog/filesystem-mcp:latest`. Mount: `/volume1/Media:/media:ro`.
+  Env: `FS_ROOTS=/media`, all other config at compose defaults
+  (write tools disabled).
+- Smoke test passes end-to-end: `/health` returns `roots:1, allow_write:false`;
+  MCP `initialize` succeeds and `tools/list` exposes the 5 read tools
+  (no write tools registered, confirming the env-gate works); real
+  `fs_list_directory` against `/media` returns the live Synology share contents.
 
 ## Next
 
