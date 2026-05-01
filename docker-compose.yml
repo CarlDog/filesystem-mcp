@@ -1,0 +1,28 @@
+services:
+  filesystem-mcp:
+    image: ghcr.io/carldog/filesystem-mcp:latest
+    pull_policy: always
+    container_name: filesystem-mcp
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-3006}:3000"
+    environment:
+      MCP_PORT: "3000"
+      FS_ROOTS: "${FS_ROOTS}"
+      FS_ALLOW_WRITE: "${FS_ALLOW_WRITE:-false}"
+      FS_DENY_FILE_PATTERNS: "${FS_DENY_FILE_PATTERNS:-*.env,*.key,*.pem,*.pfx,*.p12,id_rsa*,id_dsa*,id_ecdsa*,id_ed25519*,known_hosts,authorized_keys,.htpasswd,*.kdbx}"
+      FS_MAX_READ_BYTES: "${FS_MAX_READ_BYTES:-1048576}"
+      FS_MAX_LIST_ENTRIES: "${FS_MAX_LIST_ENTRIES:-1000}"
+    # IMPORTANT: mount your media (or whatever paths) here.
+    # The container can ONLY see what you mount. The FS_ROOTS env var
+    # then scopes which of those mounted paths the MCP is allowed to
+    # operate on. Default below is read-only — flip to :rw only after
+    # the dev chat has shipped write tools and you've reviewed them.
+    volumes:
+      - /volume1/Media:/media:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

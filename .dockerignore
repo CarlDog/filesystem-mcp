@@ -1,0 +1,15 @@
+node_modules
+dist
+.git
+.githooks
+.gitignore
+.gitleaks.toml
+.env*
+*.md
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+coverage
+tests
+docs
