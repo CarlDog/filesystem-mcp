@@ -39,6 +39,8 @@ them in. See [HANDOFF.md](HANDOFF.md) for acceptance criteria per tool.
 - GitHub Actions: `docker-publish.yml` (multi-arch GHCR) and `test.yml`
   (typecheck/build matrix on Linux/Win/macOS + lint/format on Linux).
 - Project docs: CLAUDE.md, STATUS.md, README.md, HANDOFF.md.
+- Public GitHub repo at [CarlDog/filesystem-mcp](https://github.com/CarlDog/filesystem-mcp).
+  Initial scaffold + .gitattributes pushed; CI workflows triggered.
 
 ## Next
 
