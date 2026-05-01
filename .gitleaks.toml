@@ -1,0 +1,13 @@
+title = "filesystem-mcp gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Paths excluded from secret scanning"
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)\.venv/''',
+  '''(^|/)venv/''',
+  '''(^|/)dist/''',
+]
