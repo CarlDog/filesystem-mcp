@@ -80,18 +80,36 @@ export function registerReadTools(
     {
       title: "Filesystem: Read File",
       description:
-        "[NOT YET IMPLEMENTED — see HANDOFF.md] Read the full content of a file (capped at FS_MAX_READ_BYTES). Refuses binary files (heuristic: NUL byte in first 8KB) unless force_binary=true. Refuses paths matching FS_DENY_FILE_PATTERNS.",
+        "Read a file's content. Returns content as UTF-8 text by default. Refuses files that look binary (NUL byte in first 8 KiB) unless force_binary=true, in which case content is base64-encoded — check the `binary` field on the response. Capped at FS_MAX_READ_BYTES (default 1 MiB); pass max_bytes to request fewer. Returns `truncated: true` when the cap was hit. Refuses paths matching FS_DENY_FILE_PATTERNS (e.g. *.env, *.key) and anything that resolves to a non-regular file.",
       inputSchema: {
-        path: z.string(),
-        max_bytes: z.number().int().positive().optional(),
-        force_binary: z.boolean().optional(),
+        path: z
+          .string()
+          .describe(
+            "Absolute path to a regular file inside one of the configured FS_ROOTS",
+          ),
+        max_bytes: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            "Cap on bytes read (also subject to FS_MAX_READ_BYTES). Smaller of the two wins.",
+          ),
+        force_binary: z
+          .boolean()
+          .optional()
+          .describe(
+            "If true, read binary files (returned as base64). Default false — binary files are refused with an error so the caller can decide whether to pull them.",
+          ),
       },
     },
-    async () => {
-      throw new Error(
-        "fs_read_file not implemented yet — see HANDOFF.md for acceptance criteria",
-      );
-    },
+    async ({ path: p, max_bytes, force_binary }) =>
+      asText(
+        await fs.readFile(p, {
+          maxBytes: max_bytes,
+          forceBinary: force_binary,
+        }),
+      ),
   );
 
   server.registerTool(

@@ -1,6 +1,14 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 
+/**
+ * Bytes sniffed from the start of a file when deciding whether it's
+ * binary. NUL byte in this prefix → binary. Sized to match common
+ * binary-detection conventions (file(1) uses larger; ripgrep uses
+ * smaller). Adjust if it produces false positives on your files.
+ */
+const BINARY_SNIFF_BYTES = 8192;
+
 export interface FilesystemConfig {
   /**
    * Absolute paths the MCP is allowed to operate on. Stored as their
@@ -44,6 +52,21 @@ export interface FileStat {
   mode: string;
   isSymlink: boolean;
   symlinkTarget?: string;
+}
+
+export interface ReadFileResult {
+  /** Realpath-resolved canonical path of the file that was read. */
+  path: string;
+  /** Total file size in bytes (from stat). */
+  size: number;
+  /** Bytes actually read into `content` (may be < `size` if capped). */
+  bytes_read: number;
+  /** Content. UTF-8 decoded for text, base64 for binary. */
+  content: string;
+  /** True when `bytes_read < size` — caller didn't get the whole file. */
+  truncated: boolean;
+  /** True when the file was sniffed as binary (and `force_binary` was set). */
+  binary: boolean;
 }
 
 /**
@@ -193,7 +216,70 @@ export class FilesystemClient {
     };
   }
 
-  // ---- TODO (see HANDOFF.md): readFile, findByGlob ----
+  /**
+   * Read up to `maxBytes` bytes from a regular file. Refuses non-files,
+   * deny-pattern basenames, and (by default) anything that looks
+   * binary by NUL-byte sniff of the first {@link BINARY_SNIFF_BYTES}.
+   *
+   * Cap precedence:
+   *   - opts.maxBytes if set (the zod schema rejects 0 / negatives)
+   *   - else config.maxReadBytes
+   *   - if the chosen cap is 0, read the whole file (no cap)
+   *
+   * Binary content is base64-encoded; text is UTF-8 decoded.
+   */
+  async readFile(
+    inputPath: string,
+    opts: { maxBytes?: number; forceBinary?: boolean } = {},
+  ): Promise<ReadFileResult> {
+    const real = await this.assertWithinRoots(inputPath);
+    this.assertNotDenied(path.basename(real));
+
+    const st = await fs.lstat(real);
+    if (!st.isFile()) {
+      throw new Error(`not a regular file: ${real}`);
+    }
+
+    const requestedCap = opts.maxBytes ?? this.config.maxReadBytes;
+    const bytesToRead =
+      requestedCap === 0 ? st.size : Math.min(requestedCap, st.size);
+
+    const buf = Buffer.alloc(bytesToRead);
+    let bytesRead = 0;
+    if (bytesToRead > 0) {
+      const handle = await fs.open(real, "r");
+      try {
+        const result = await handle.read(buf, 0, bytesToRead, 0);
+        bytesRead = result.bytesRead;
+      } finally {
+        await handle.close();
+      }
+    }
+    const data = bytesRead === buf.length ? buf : buf.subarray(0, bytesRead);
+
+    // NUL-byte sniff over the prefix we already have in memory.
+    const sniffSlice = data.subarray(
+      0,
+      Math.min(data.length, BINARY_SNIFF_BYTES),
+    );
+    const isBinary = sniffSlice.indexOf(0) !== -1;
+    if (isBinary && !opts.forceBinary) {
+      throw new Error(
+        `file looks binary (NUL byte in first ${BINARY_SNIFF_BYTES} bytes); pass force_binary=true to read anyway: ${real}`,
+      );
+    }
+
+    return {
+      path: real,
+      size: st.size,
+      bytes_read: bytesRead,
+      content: isBinary ? data.toString("base64") : data.toString("utf8"),
+      truncated: bytesRead < st.size,
+      binary: isBinary,
+    };
+  }
+
+  // ---- TODO (see HANDOFF.md): findByGlob ----
 
   // ---- TODO (see HANDOFF.md): write ops — move, copy, delete, mkdir ----
   // All write methods MUST:
