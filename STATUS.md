@@ -5,12 +5,11 @@
 ## Phase
 
 All five read tools fully working: `fs_list_roots`, `fs_list_directory`,
-`fs_stat`, `fs_read_file`, `fs_find_by_glob`. First write tool
-(`fs_mkdir`) implemented with `dry_run` default-true and
-`FS_ALLOW_WRITE` gate. Three write tools still stubbed (`fs_move`,
-`fs_copy`, `fs_delete`). Vitest suite covers safety primitives,
-list/stat, readFile, findByGlob, and mkdir — 41 tests passing on
-Windows + Linux + macOS in CI (6 symlink tests skip on Windows). See
+`fs_stat`, `fs_read_file`, `fs_find_by_glob`. Two write tools
+implemented (`fs_mkdir`, `fs_move`) with `dry_run` default-true and
+`FS_ALLOW_WRITE` gate. Two write tools still stubbed (`fs_copy`,
+`fs_delete`). Vitest suite — 52 tests passing on Windows + Linux +
+macOS in CI (7 symlink tests skip on Windows). See
 [HANDOFF.md](HANDOFF.md) for acceptance criteria per remaining tool.
 
 ## Done
@@ -40,8 +39,14 @@ Windows + Linux + macOS in CI (6 symlink tests skip on Windows). See
   `FS_ALLOW_WRITE` gates even dry-run. Also generalized
   `assertWithinRoots(p, mustExist=false)` to walk multiple missing
   ancestors (needed for recursive mkdir).
-- Three write-tool stubs remaining (only registered when
-  `FS_ALLOW_WRITE=true`): `fs_move`, `fs_copy`, `fs_delete`.
+- `fs_move` implemented: rename via `fs.rename` (atomic on same
+  device); on EXDEV falls back to copy+delete with `cross_device:true`
+  flag (NOT atomic). Refuses symlink sources to avoid dangling links.
+  Refuses directory destinations regardless of overwrite. Refuses
+  file destinations unless `overwrite=true`. Deny-pattern checked on
+  both basenames.
+- Two write-tool stubs remaining (only registered when
+  `FS_ALLOW_WRITE=true`): `fs_copy`, `fs_delete`.
 - McpServer ships with a populated `instructions` field (server-level
   prose handed to the LLM at session init) — covers idioms, safety
   story, and composition with sister MCPs.
@@ -86,7 +91,7 @@ acceptance criteria. Summary:
 4. ~~Add vitest tests with a temp-dir sandbox helper~~ — done; CI
    runs `npm test` across all three OSes.
 5. Implement write tools, **all gated on `dry_run` default true**, in
-   the order: ~~`fs_mkdir`~~ → `fs_move` → `fs_copy` → `fs_delete`.
+   the order: ~~`fs_mkdir`~~ → ~~`fs_move`~~ → `fs_copy` → `fs_delete`.
 6. Wire into Claude Desktop / Claude Code at user scope.
 
 ## Open Decisions
