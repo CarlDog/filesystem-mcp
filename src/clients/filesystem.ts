@@ -60,6 +60,22 @@ export interface FileStat {
   symlinkTarget?: string;
 }
 
+export interface MkdirResult {
+  /** Realpath-resolved canonical path of the target directory. */
+  path: string;
+  /** Echo of the recursive flag. */
+  recursive: boolean;
+  /** Echo of the dry-run flag (true ⇒ nothing was actually created). */
+  dry_run: boolean;
+  /** True iff dry_run was false (operation executed, even if a no-op). */
+  performed: boolean;
+  /**
+   * Ordered list of paths that would be (or were) created, parent→leaf.
+   * Empty when the target already existed as a directory.
+   */
+  paths_to_create: string[];
+}
+
 export interface FindResult {
   /** Path as walked (root-relative when descending through symlinks; the
    * symlink path itself when emitted as a match, never the realpath). */
@@ -125,14 +141,34 @@ export class FilesystemClient {
       return real;
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
-      if (!mustExist && e.code === "ENOENT") {
-        const parent = await fs.realpath(path.dirname(absolute));
-        if (!this.isInRoots(parent)) {
+      if (mustExist || e.code !== "ENOENT") throw err;
+
+      // Walk up until we find an existing ancestor (handles the
+      // recursive-mkdir case where multiple parents may be missing).
+      // Verify that ancestor is in roots, then re-join the missing
+      // segments so the returned path is the canonical form the caller
+      // can use after the missing dirs are created.
+      const missing: string[] = [];
+      let current = absolute;
+      while (true) {
+        const parent = path.dirname(current);
+        if (parent === current) {
+          // walked to the filesystem root without finding an ancestor
           throw new Error(`path escapes configured FS_ROOTS: ${inputPath}`);
         }
-        return path.join(parent, path.basename(absolute));
+        missing.unshift(path.basename(current));
+        try {
+          const real = await fs.realpath(parent);
+          if (!this.isInRoots(real)) {
+            throw new Error(`path escapes configured FS_ROOTS: ${inputPath}`);
+          }
+          return path.join(real, ...missing);
+        } catch (err2) {
+          const e2 = err2 as NodeJS.ErrnoException;
+          if (e2.code !== "ENOENT") throw err2;
+          current = parent;
+        }
       }
-      throw err;
     }
   }
 
@@ -417,15 +453,102 @@ export class FilesystemClient {
     }
   }
 
-  // ---- TODO (see HANDOFF.md): write ops — move, copy, delete, mkdir ----
-  // All write methods MUST:
-  //   1. Check `this.config.allowWrite` and throw if false.
-  //   2. Validate every path argument with assertWithinRoots() —
-  //      sources mustExist=true, destinations mustExist=false.
-  //   3. Honor a `dryRun` parameter that returns a "would happen"
-  //      preview without performing the operation.
-  //   4. For destructive ops (delete), refuse to traverse out of a
-  //      root via symlink.
+  // ---- Write ops ----
+  //
+  // All write methods:
+  //   1. Check `this.config.allowWrite` and throw if false (gates even
+  //      dry-runs — the operator turning the flag off means "no preview
+  //      either").
+  //   2. Validate every path argument with assertWithinRoots() — sources
+  //      mustExist=true, destinations mustExist=false.
+  //   3. Honor a `dryRun` parameter that returns the "would happen"
+  //      shape without touching the filesystem.
+
+  /**
+   * Create a directory. Refuses paths outside roots, paths matching
+   * deny-patterns, and paths whose existing leaf is a regular file
+   * (idempotent only on existing directories). Honors `recursive` and
+   * `dryRun`.
+   */
+  async mkdir(
+    inputPath: string,
+    opts: { recursive?: boolean; dryRun?: boolean } = {},
+  ): Promise<MkdirResult> {
+    if (!this.config.allowWrite) {
+      throw new Error("write operations are disabled (FS_ALLOW_WRITE=false)");
+    }
+    const recursive = opts.recursive ?? false;
+    const dryRun = opts.dryRun ?? true;
+
+    const target = await this.assertWithinRoots(inputPath, false);
+    this.assertNotDenied(path.basename(target));
+
+    // Discover what would be created.
+    const pathsToCreate = await this.computeMkdirPlan(target, recursive);
+
+    if (!dryRun && pathsToCreate.length > 0) {
+      await fs.mkdir(target, { recursive });
+    }
+
+    return {
+      path: target,
+      recursive,
+      dry_run: dryRun,
+      performed: !dryRun,
+      paths_to_create: pathsToCreate,
+    };
+  }
+
+  /**
+   * Walk from `target` up the parent chain until an existing ancestor
+   * is found. Returns the chain of paths-to-create, parent→leaf order.
+   * Returns `[]` when target already exists as a directory; throws if
+   * target exists as a non-directory or (when !recursive) the parent
+   * is missing.
+   */
+  private async computeMkdirPlan(
+    target: string,
+    recursive: boolean,
+  ): Promise<string[]> {
+    try {
+      const st = await fs.lstat(target);
+      if (st.isDirectory()) return [];
+      throw new Error(`exists and is not a directory: ${target}`);
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code !== "ENOENT") throw err;
+      // Target doesn't exist — fall through to chain discovery.
+    }
+
+    if (!recursive) {
+      const parent = path.dirname(target);
+      try {
+        await fs.lstat(parent);
+      } catch {
+        throw new Error(
+          `parent does not exist (use recursive=true to create it): ${parent}`,
+        );
+      }
+      return [target];
+    }
+
+    const toCreate: string[] = [];
+    let current = target;
+    while (true) {
+      toCreate.unshift(current);
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      try {
+        await fs.lstat(parent);
+        break;
+      } catch (err) {
+        const e = err as NodeJS.ErrnoException;
+        if (e.code !== "ENOENT") throw err;
+        current = parent;
+      }
+    }
+    return toCreate;
+  }
 }
 
 /**
