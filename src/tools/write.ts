@@ -21,21 +21,39 @@ export function registerWriteTools(
     {
       title: "Filesystem: Move/Rename",
       description:
-        "[NOT YET IMPLEMENTED — see HANDOFF.md] Move or rename a path. Both `from` and `to` must resolve under FS_ROOTS. Cross-device moves should fall back to copy+delete. Honors `dry_run`.",
+        "Move or rename a path. Both `from` and `to` must resolve under FS_ROOTS, and neither basename may match FS_DENY_FILE_PATTERNS. Refuses symlink sources (would silently move the target through the link, leaving a dangling pointer — pass the realpath directly). Refuses destinations that exist as a directory. Refuses destinations that exist as a regular file unless overwrite=true. Atomic via rename on the same device; on EXDEV falls back to copy+delete with cross_device=true in the response (NOT atomic). Honors dry_run.",
       inputSchema: {
-        from: z.string(),
-        to: z.string(),
+        from: z
+          .string()
+          .describe(
+            "Absolute source path (must exist, must not be a symlink).",
+          ),
+        to: z
+          .string()
+          .describe(
+            "Absolute destination path. Parent must exist inside FS_ROOTS.",
+          ),
+        overwrite: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Allow replacing an existing regular file at the destination. Never replaces a directory regardless. Default false.",
+          ),
         dry_run: z
           .boolean()
-          .optional()
-          .describe("Preview without performing the move (default true)"),
+          .default(true)
+          .describe(
+            "Preview without performing the move. Default true — opt in to actual mutation per call by passing false.",
+          ),
       },
     },
-    async () => {
-      throw new Error(
-        "fs_move not implemented yet — see HANDOFF.md for acceptance criteria",
-      );
-    },
+    async ({ from, to, overwrite, dry_run }) =>
+      asText(
+        await fs.move(from, to, {
+          overwrite,
+          dryRun: dry_run,
+        }),
+      ),
   );
 
   server.registerTool(
