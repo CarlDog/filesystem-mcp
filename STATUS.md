@@ -5,10 +5,12 @@
 ## Phase
 
 All five read tools fully working: `fs_list_roots`, `fs_list_directory`,
-`fs_stat`, `fs_read_file`, `fs_find_by_glob`. The four write tools
-(`fs_move`, `fs_copy`, `fs_delete`, `fs_mkdir`) remain stubbed. Tests
-not yet set up. See [HANDOFF.md](HANDOFF.md) for acceptance criteria
-per remaining tool.
+`fs_stat`, `fs_read_file`, `fs_find_by_glob`. Vitest suite covers
+safety primitives, list/stat, readFile, and findByGlob — 30 tests
+passing on Windows + Linux + macOS in CI (6 symlink tests skip on
+Windows). The four write tools (`fs_move`, `fs_copy`, `fs_delete`,
+`fs_mkdir`) remain stubbed. See [HANDOFF.md](HANDOFF.md) for
+acceptance criteria per remaining tool.
 
 ## Done
 
@@ -45,7 +47,12 @@ per remaining tool.
   (author identity + gitleaks + PII pattern scan).
 - VS Code workspace config + ESLint 9 flat config + Prettier.
 - GitHub Actions: `docker-publish.yml` (multi-arch GHCR) and `test.yml`
-  (typecheck/build matrix on Linux/Win/macOS + lint/format on Linux).
+  (typecheck/build/test matrix on Linux/Win/macOS + lint/format on
+  Linux).
+- Vitest test suite (`tests/sandbox.ts` + four feature-scoped files)
+  covering safety primitives, list/stat, readFile, findByGlob (30
+  tests, 6 symlink-gated tests skip on Windows). Wired into CI via
+  `npm test` step in the matrix.
 - Project docs: CLAUDE.md, STATUS.md, README.md, HANDOFF.md.
 - Public GitHub repo at [CarlDog/filesystem-mcp](https://github.com/CarlDog/filesystem-mcp).
   Initial scaffold + .gitattributes pushed; CI workflows green.
@@ -69,8 +76,8 @@ acceptance criteria. Summary:
 2. ~~Implement `fs_find_by_glob`~~ — done, deployed, smoke-tested.
 3. ~~Smoke-test deploy on the NAS~~ — done. Stack #152 live with
    `FS_VOLUME=/volume1/Media:/media:ro`.
-4. Add vitest tests with a temp-dir sandbox helper, before write tools
-   land. Once green, wire `npm test` into `test.yml`.
+4. ~~Add vitest tests with a temp-dir sandbox helper~~ — done; CI
+   runs `npm test` across all three OSes.
 5. Implement write tools, **all gated on `dry_run` default true**, in
    the order: `fs_mkdir` → `fs_move` → `fs_copy` → `fs_delete`.
 6. Wire into Claude Desktop / Claude Code at user scope.
@@ -105,11 +112,6 @@ the dev chat unless evidence shows them wrong):
 
 ## Known Gaps
 
-- No tests yet — `tests/` is empty. Set up vitest with a temp-dir
-  sandbox before implementing write tools.
-- The `package-lock.json` will be generated on first `npm install`.
-- `fs_find_by_glob` will need a glob library — `picomatch` (lightweight)
-  or `fast-glob` (full-featured). HANDOFF.md recommends `picomatch`.
 - Container logs returned by `tools/write.ts` stubs hard-code "not
   implemented" — when the dev chat fills them in, replace those error
   throws with real implementations.
