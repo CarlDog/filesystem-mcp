@@ -13,13 +13,21 @@ services:
       FS_DENY_FILE_PATTERNS: "${FS_DENY_FILE_PATTERNS:-*.env,*.key,*.pem,*.pfx,*.p12,id_rsa*,id_dsa*,id_ecdsa*,id_ed25519*,known_hosts,authorized_keys,.htpasswd,*.kdbx}"
       FS_MAX_READ_BYTES: "${FS_MAX_READ_BYTES:-1048576}"
       FS_MAX_LIST_ENTRIES: "${FS_MAX_LIST_ENTRIES:-1000}"
-    # IMPORTANT: mount your media (or whatever paths) here.
-    # The container can ONLY see what you mount. The FS_ROOTS env var
-    # then scopes which of those mounted paths the MCP is allowed to
-    # operate on. Default below is read-only — flip to :rw only after
-    # the dev chat has shipped write tools and you've reviewed them.
+    # IMPORTANT: mount your data into the container.
+    #
+    # The container can ONLY see what you mount, and FS_ROOTS scopes
+    # *within* what's mounted. The bind spec is parameterized — set
+    # FS_VOLUME on the stack/env to a `host:container[:flags]` string,
+    # e.g. `/volume1/Media:/media:ro`. The compose deploy will fail
+    # loudly if FS_VOLUME is unset (no silent empty-mount surprises).
+    #
+    # For multiple roots: extend this list with additional entries
+    # (e.g. `${FS_VOLUME_2}` plus the matching env var). FS_ROOTS would
+    # then list all mounted-into container paths, comma-separated.
+    #
+    # Read-only is strongly recommended until write tools are reviewed.
     volumes:
-      - /volume1/Media:/media:ro
+      - "${FS_VOLUME:?FS_VOLUME must be set, e.g. /volume1/Media:/media:ro}"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O-", "http://localhost:3000/health"]
       interval: 30s
