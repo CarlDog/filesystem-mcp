@@ -60,6 +60,25 @@ export interface FileStat {
   symlinkTarget?: string;
 }
 
+export interface MoveResult {
+  /** Realpath-resolved canonical source path. */
+  from: string;
+  /** Resolved-canonical destination path. */
+  to: string;
+  /** Echo of dry_run. */
+  dry_run: boolean;
+  /** True iff dry_run was false. */
+  performed: boolean;
+  /** True when an existing entry at `to` was (or would be) replaced. */
+  would_overwrite: boolean;
+  /**
+   * True when the rename hit EXDEV and fell back to copy+delete. The
+   * fallback is NOT atomic — a crash mid-operation leaves both copies.
+   * Caller should treat this flag as a "non-atomic move was used."
+   */
+  cross_device: boolean;
+}
+
 export interface MkdirResult {
   /** Realpath-resolved canonical path of the target directory. */
   path: string;
@@ -111,8 +130,10 @@ export interface ReadFileResult {
  *     read/stat. Default patterns cover common sensitive files
  *     (.env, *.key, id_rsa*, etc.) — see .env.example.
  *
- * Write methods (move/copy/delete/mkdir) are intentionally not
- * implemented in the scaffold — see HANDOFF.md.
+ * Write methods (mkdir, move, copy, delete) check `config.allowWrite`
+ * and throw if false (defense-in-depth on top of the
+ * tool-registration gate). Each honors a `dryRun` parameter that
+ * returns the "would happen" shape without touching the filesystem.
  */
 export class FilesystemClient {
   constructor(private readonly config: FilesystemConfig) {}
@@ -548,6 +569,92 @@ export class FilesystemClient {
       }
     }
     return toCreate;
+  }
+
+  /**
+   * Move (rename) `from` → `to`. Atomic via `fs.rename` on the same
+   * device; on EXDEV falls back to copy-then-delete (NOT atomic;
+   * `cross_device: true` flag in result signals this).
+   *
+   * Refuses:
+   *   - sources that are themselves symlinks (would silently move the
+   *     target through the link, leaving a dangling pointer)
+   *   - destinations that already exist as a directory (use a different
+   *     path; we don't do "move into a dir" semantics)
+   *   - destinations that exist as a regular file when `overwrite=false`
+   */
+  async move(
+    fromInput: string,
+    toInput: string,
+    opts: { overwrite?: boolean; dryRun?: boolean } = {},
+  ): Promise<MoveResult> {
+    if (!this.config.allowWrite) {
+      throw new Error("write operations are disabled (FS_ALLOW_WRITE=false)");
+    }
+    const overwrite = opts.overwrite ?? false;
+    const dryRun = opts.dryRun ?? true;
+
+    // Refuse symlink sources before realpath would silently follow them.
+    const fromAbs = path.resolve(fromInput);
+    const fromLstat = await fs.lstat(fromAbs).catch(() => null);
+    if (fromLstat && fromLstat.isSymbolicLink()) {
+      throw new Error(
+        `fs_move refuses symlink sources to avoid leaving dangling links; pass the target path directly: ${fromInput}`,
+      );
+    }
+
+    const from = await this.assertWithinRoots(fromInput, true);
+    this.assertNotDenied(path.basename(from));
+
+    const to = await this.assertWithinRoots(toInput, false);
+    this.assertNotDenied(path.basename(to));
+
+    // Inspect the destination state.
+    let toLstat: Awaited<ReturnType<typeof fs.lstat>> | null = null;
+    try {
+      toLstat = await fs.lstat(to);
+    } catch {
+      // doesn't exist — fine
+    }
+    if (toLstat) {
+      if (toLstat.isDirectory()) {
+        throw new Error(`destination already exists as a directory: ${to}`);
+      }
+      if (!overwrite) {
+        throw new Error(
+          `destination exists; pass overwrite=true to replace: ${to}`,
+        );
+      }
+    }
+
+    const wouldOverwrite = toLstat !== null;
+    let crossDevice = false;
+
+    if (!dryRun) {
+      try {
+        await fs.rename(from, to);
+      } catch (err) {
+        const e = err as NodeJS.ErrnoException;
+        if (e.code !== "EXDEV") throw err;
+        crossDevice = true;
+        // Cross-device fallback. NOT atomic — flagged via `cross_device`.
+        await fs.cp(from, to, {
+          recursive: true,
+          force: true,
+          preserveTimestamps: true,
+        });
+        await fs.rm(from, { recursive: true });
+      }
+    }
+
+    return {
+      from,
+      to,
+      dry_run: dryRun,
+      performed: !dryRun,
+      would_overwrite: wouldOverwrite,
+      cross_device: crossDevice,
+    };
   }
 }
 
