@@ -8,9 +8,9 @@ move/copy/delete. Designed as a companion to media-management MCPs
 reconcile "what should be on disk" against "what's actually there",
 and — when explicitly enabled — fix the differences.
 
-> **This repo is in scaffold state.** Three read tools work; the rest
-> are registered as stubs. See [HANDOFF.md](HANDOFF.md) for the
-> implementation plan.
+> **This repo is mid-build.** All five read tools work; the four
+> write tools are registered as stubs. See [HANDOFF.md](HANDOFF.md)
+> for the implementation plan.
 
 ## Tools
 
@@ -21,8 +21,8 @@ and — when explicitly enabled — fix the differences.
 | `fs_list_roots` | ✅ implemented | List the absolute paths the MCP is allowed to operate on |
 | `fs_list_directory` | ✅ implemented | List entries in a directory (filters deny-patterns) |
 | `fs_stat` | ✅ implemented | Get metadata for a file/dir/symlink |
-| `fs_read_file` | 🟡 stub | Read file content (binary-aware, byte-capped) |
-| `fs_find_by_glob` | 🟡 stub | Find paths matching a glob pattern under a root |
+| `fs_read_file` | ✅ implemented | Read file content (binary-aware, byte-capped) |
+| `fs_find_by_glob` | ✅ implemented | Find paths matching a glob pattern under a root |
 
 ### Write (only when `FS_ALLOW_WRITE=true`)
 
@@ -43,6 +43,7 @@ and — when explicitly enabled — fix the differences.
 | `FS_MAX_READ_BYTES` | no | Cap on `fs_read_file` (default 1 MiB; 0 disables) |
 | `FS_MAX_LIST_ENTRIES` | no | Cap on `fs_list_directory` (default 1000) |
 | `MCP_PORT` | no | Set to enable HTTP transport. Unset = stdio. |
+| `FS_VOLUME` | yes (compose only) | `host:container[:flags]` bind spec consumed by `docker-compose.yml`. Ignored by `npm run dev`. |
 
 ## Safety model
 
@@ -70,6 +71,9 @@ exposed.** The container only sees what `docker-compose.yml` mounts.
 ## Run with Docker Compose
 
 ```bash
+# Required: bind spec for the container's data mount, host:container[:flags]
+export FS_VOLUME=/volume1/Media:/media:ro
+# Required: which mounted-into-container paths the MCP may operate on
 export FS_ROOTS=/media
 # Optional:
 # export FS_ALLOW_WRITE=true
@@ -80,9 +84,15 @@ docker compose up
 
 The MCP endpoint will be at `http://<host>:${HOST_PORT:-3006}/mcp`.
 
-Adjust the `volumes:` block in `docker-compose.yml` to mount your
-media (or whatever paths) into the container. The default is
-`/volume1/Media:/media:ro` (Synology NAS, read-only).
+`FS_VOLUME` is required at deploy time — compose fails loudly if
+unset rather than silently mounting nothing. There is no default
+because deployment paths vary (`/volume1/Media` is Synology-specific;
+`/srv/...` for many Linux setups; etc.).
+
+For multi-root deploys, extend the `volumes:` list in
+`docker-compose.yml` with additional entries (e.g. `${FS_VOLUME_2}`)
+and set the matching env vars. `FS_ROOTS` is then comma-separated:
+`FS_ROOTS=/media,/photos`.
 
 ## Use with Claude Desktop / Claude Code
 
