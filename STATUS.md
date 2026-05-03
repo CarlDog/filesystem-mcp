@@ -1,15 +1,14 @@
 # Status
 
-**Last updated:** 2026-05-01
+**Last updated:** 2026-05-03
 
 ## Phase
 
-Scaffolded. Three working tools (`fs_list_roots`, `fs_list_directory`,
-`fs_stat`) prove the env → safety → fs pipeline end-to-end. The
-remaining read tools (`fs_read_file`, `fs_find_by_glob`) and all four
-write tools (`fs_move`, `fs_copy`, `fs_delete`, `fs_mkdir`) are
-registered as stubs that throw "not implemented" — the dev chat fills
-them in. See [HANDOFF.md](HANDOFF.md) for acceptance criteria per tool.
+Deployed and accumulating tools. Four read tools fully working
+(`fs_list_roots`, `fs_list_directory`, `fs_stat`, `fs_read_file`).
+One read tool (`fs_find_by_glob`) and all four write tools
+(`fs_move`, `fs_copy`, `fs_delete`, `fs_mkdir`) still stubbed.
+See [HANDOFF.md](HANDOFF.md) for acceptance criteria per remaining tool.
 
 ## Done
 
@@ -19,10 +18,13 @@ them in. See [HANDOFF.md](HANDOFF.md) for acceptance criteria per tool.
   path-scoping (resolves symlinks, asserts membership in `FS_ROOTS`)
   and deny-pattern (glob match against basename, default covers
   `.env`/`*.key`/`id_rsa*`/etc.).
-- Three read tools fully implemented and registered:
-  `fs_list_roots`, `fs_list_directory`, `fs_stat`.
-- Two read-tool stubs registered (returns "not implemented" error
-  when called): `fs_read_file`, `fs_find_by_glob`.
+- Four read tools fully implemented and registered:
+  `fs_list_roots`, `fs_list_directory`, `fs_stat`, `fs_read_file`.
+- `fs_read_file`: NUL-byte sniff over first 8 KiB, base64 for binary,
+  UTF-8 for text, single-read with cap precedence (opts.maxBytes >
+  config.maxReadBytes; cap=0 disables). Smoke-tested against the live
+  NAS with text + binary, capped + uncapped, force_binary on/off.
+- One read-tool stub remaining: `fs_find_by_glob` (registered, throws).
 - Four write-tool stubs registered (only when `FS_ALLOW_WRITE=true`):
   `fs_move`, `fs_copy`, `fs_delete`, `fs_mkdir`.
 - McpServer ships with a populated `instructions` field (server-level
@@ -56,9 +58,10 @@ them in. See [HANDOFF.md](HANDOFF.md) for acceptance criteria per tool.
 See [HANDOFF.md](HANDOFF.md) for the prioritized list with per-tool
 acceptance criteria. Summary:
 
-1. Implement `fs_read_file` (binary detection, byte cap).
+1. ~~Implement `fs_read_file`~~ — done, deployed, smoke-tested.
 2. Implement `fs_find_by_glob` (full glob; honor deny-patterns + roots).
-3. Smoke-test deploy on the NAS with a read-only mount.
+3. ~~Smoke-test deploy on the NAS~~ — done. Stack #152 live with
+   read-only `/volume1/Media:/media:ro` mount.
 4. Implement write tools, **all gated on `dry_run` default true**, in
    the order: `fs_mkdir` → `fs_move` → `fs_copy` → `fs_delete`.
 5. Add tests once a sandbox dir is set up.
