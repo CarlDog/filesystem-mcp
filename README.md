@@ -31,7 +31,7 @@ and — when explicitly enabled — fix the differences.
 | `fs_move` | 🟡 stub | Move or rename a path (`dry_run` defaults true) |
 | `fs_copy` | 🟡 stub | Copy a file or directory (`dry_run` defaults true) |
 | `fs_delete` | 🟡 stub | Delete a path (`dry_run` defaults true; recursive opt-in) |
-| `fs_mkdir` | 🟡 stub | Create a directory (`dry_run` defaults true; recursive opt-in) |
+| `fs_mkdir` | ✅ implemented | Create a directory (`dry_run` defaults true; recursive opt-in) |
 
 ## Configuration
 
