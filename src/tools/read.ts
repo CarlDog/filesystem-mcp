@@ -117,26 +117,36 @@ export function registerReadTools(
     {
       title: "Filesystem: Find by Glob",
       description:
-        "[NOT YET IMPLEMENTED — see HANDOFF.md] Find paths matching a glob pattern (e.g. '**/*.mkv') under a starting directory. Honors FS_DENY_FILE_PATTERNS. Capped at max_results.",
+        "Find paths matching a glob pattern (picomatch syntax — supports **, *, ?, [...], {a,b}). Patterns without a slash match by basename (so '*.mkv' works); patterns with slashes match against the walk-root-relative path. BFS walk with cycle protection. Symlinks are followed if their target lands inside a configured FS_ROOT, skipped otherwise. Honors FS_DENY_FILE_PATTERNS (no descent, no emit). Capped at max_results (also clamped by FS_MAX_LIST_ENTRIES). When `path` is omitted, walks every configured root.",
       inputSchema: {
         pattern: z
           .string()
+          .min(1)
           .describe(
-            "Glob pattern (full glob — supports **, *, ?, [...], {a,b})",
+            "Glob pattern (picomatch — supports **, *, ?, [...], {a,b}). No slashes ⇒ basename match.",
           ),
         path: z
           .string()
           .optional()
           .describe(
-            "Starting directory (absolute, inside FS_ROOTS). Defaults to all configured roots.",
+            "Starting directory (absolute, inside FS_ROOTS). Defaults to walking every configured root.",
           ),
-        max_results: z.number().int().positive().optional(),
+        max_results: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            "Cap on matches returned (also clamped by FS_MAX_LIST_ENTRIES).",
+          ),
       },
     },
-    async () => {
-      throw new Error(
-        "fs_find_by_glob not implemented yet — see HANDOFF.md for acceptance criteria",
-      );
-    },
+    async ({ pattern, path: p, max_results }) =>
+      asText(
+        await fs.findByGlob(pattern, {
+          startPath: p,
+          maxResults: max_results,
+        }),
+      ),
   );
 }
