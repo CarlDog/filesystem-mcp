@@ -4,11 +4,11 @@
 
 ## Phase
 
-Deployed and accumulating tools. Four read tools fully working
-(`fs_list_roots`, `fs_list_directory`, `fs_stat`, `fs_read_file`).
-One read tool (`fs_find_by_glob`) and all four write tools
-(`fs_move`, `fs_copy`, `fs_delete`, `fs_mkdir`) still stubbed.
-See [HANDOFF.md](HANDOFF.md) for acceptance criteria per remaining tool.
+All five read tools fully working: `fs_list_roots`, `fs_list_directory`,
+`fs_stat`, `fs_read_file`, `fs_find_by_glob`. The four write tools
+(`fs_move`, `fs_copy`, `fs_delete`, `fs_mkdir`) remain stubbed. Tests
+not yet set up. See [HANDOFF.md](HANDOFF.md) for acceptance criteria
+per remaining tool.
 
 ## Done
 
@@ -18,13 +18,19 @@ See [HANDOFF.md](HANDOFF.md) for acceptance criteria per remaining tool.
   path-scoping (resolves symlinks, asserts membership in `FS_ROOTS`)
   and deny-pattern (glob match against basename, default covers
   `.env`/`*.key`/`id_rsa*`/etc.).
-- Four read tools fully implemented and registered:
-  `fs_list_roots`, `fs_list_directory`, `fs_stat`, `fs_read_file`.
+- All five read tools fully implemented and registered:
+  `fs_list_roots`, `fs_list_directory`, `fs_stat`, `fs_read_file`,
+  `fs_find_by_glob`.
 - `fs_read_file`: NUL-byte sniff over first 8 KiB, base64 for binary,
   UTF-8 for text, single-read with cap precedence (opts.maxBytes >
   config.maxReadBytes; cap=0 disables). Smoke-tested against the live
   NAS with text + binary, capped + uncapped, force_binary on/off.
-- One read-tool stub remaining: `fs_find_by_glob` (registered, throws).
+- `fs_find_by_glob`: picomatch with `matchBase:true` (slashless patterns
+  match basename), BFS walk with a single visited set across all roots
+  (cycle protection + cross-root dedup), symlinks followed when target
+  lands in any configured root, deny-pattern filters both descent and
+  emission. Smoke-tested against `/media` for basename, multi-segment
+  glob with startPath, and empty-result correctness.
 - Four write-tool stubs registered (only when `FS_ALLOW_WRITE=true`):
   `fs_move`, `fs_copy`, `fs_delete`, `fs_mkdir`.
 - McpServer ships with a populated `instructions` field (server-level
@@ -45,7 +51,8 @@ See [HANDOFF.md](HANDOFF.md) for acceptance criteria per remaining tool.
   Initial scaffold + .gitattributes pushed; CI workflows green.
 - Deployed as Portainer git stack (#152) on `carldog-nas` endpoint 2,
   pulling from `refs/heads/main`. Image:
-  `ghcr.io/carldog/filesystem-mcp:latest`. Mount: `/volume1/Media:/media:ro`.
+  `ghcr.io/carldog/filesystem-mcp:latest`. Mount: parameterized via
+  `FS_VOLUME` stack env (currently `/volume1/Media:/media:ro`).
   Env: `FS_ROOTS=/media`, all other config at compose defaults
   (write tools disabled).
 - Smoke test passes end-to-end: `/health` returns `roots:1, allow_write:false`;
@@ -59,12 +66,13 @@ See [HANDOFF.md](HANDOFF.md) for the prioritized list with per-tool
 acceptance criteria. Summary:
 
 1. ~~Implement `fs_read_file`~~ — done, deployed, smoke-tested.
-2. Implement `fs_find_by_glob` (full glob; honor deny-patterns + roots).
+2. ~~Implement `fs_find_by_glob`~~ — done, deployed, smoke-tested.
 3. ~~Smoke-test deploy on the NAS~~ — done. Stack #152 live with
-   read-only `/volume1/Media:/media:ro` mount.
-4. Implement write tools, **all gated on `dry_run` default true**, in
+   `FS_VOLUME=/volume1/Media:/media:ro`.
+4. Add vitest tests with a temp-dir sandbox helper, before write tools
+   land. Once green, wire `npm test` into `test.yml`.
+5. Implement write tools, **all gated on `dry_run` default true**, in
    the order: `fs_mkdir` → `fs_move` → `fs_copy` → `fs_delete`.
-5. Add tests once a sandbox dir is set up.
 6. Wire into Claude Desktop / Claude Code at user scope.
 
 ## Open Decisions
