@@ -21,12 +21,14 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "express": "^4.21.0",
+    "picomatch": "^4.0.4",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
     "@types/express": "^4.17.0",
     "@types/node": "^22.0.0",
+    "@types/picomatch": "^4.0.3",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^9.0.0",
     "prettier": "^3.0.0",

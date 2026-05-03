@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
+import picomatch from "picomatch";
 
 /**
  * Bytes sniffed from the start of a file when deciding whether it's
@@ -8,6 +9,11 @@ import * as path from "node:path";
  * smaller). Adjust if it produces false positives on your files.
  */
 const BINARY_SNIFF_BYTES = 8192;
+
+/** Normalize a path to forward slashes so picomatch behaves the same on Windows. */
+function toPosixPath(p: string): string {
+  return p.split(path.sep).join("/");
+}
 
 export interface FilesystemConfig {
   /**
@@ -52,6 +58,13 @@ export interface FileStat {
   mode: string;
   isSymlink: boolean;
   symlinkTarget?: string;
+}
+
+export interface FindResult {
+  /** Path as walked (root-relative when descending through symlinks; the
+   * symlink path itself when emitted as a match, never the realpath). */
+  path: string;
+  type: "file" | "dir" | "symlink" | "other";
 }
 
 export interface ReadFileResult {
@@ -279,7 +292,130 @@ export class FilesystemClient {
     };
   }
 
-  // ---- TODO (see HANDOFF.md): findByGlob ----
+  /**
+   * Walk the filesystem from `startPath` (or all configured roots if
+   * unset) and return entries whose basename or walk-root-relative path
+   * matches `pattern` (picomatch syntax — supports `*`, `**`, `?`,
+   * `{a,b}`, `[abc]`).
+   *
+   * - BFS, single visited set across the whole call (cycle protection
+   *   AND cross-root dedup if a symlink in one root targets another).
+   * - Symlinks: realpath the target. If it lands in any configured
+   *   root, descend (queue the symlink path itself so emitted child
+   *   paths stay route-through-the-link); otherwise skip.
+   * - Deny-pattern matches are skipped both for emission AND descent.
+   * - Cap is global, clamped to `config.maxListEntries`.
+   */
+  async findByGlob(
+    pattern: string,
+    opts: { startPath?: string; maxResults?: number } = {},
+  ): Promise<FindResult[]> {
+    const cap = Math.min(
+      opts.maxResults ?? this.config.maxListEntries,
+      this.config.maxListEntries,
+    );
+    const matcher = picomatch(pattern, { matchBase: true });
+
+    const walkRoots: string[] = [];
+    if (opts.startPath !== undefined) {
+      walkRoots.push(await this.assertWithinRoots(opts.startPath));
+    } else {
+      walkRoots.push(...this.config.roots);
+    }
+
+    const results: FindResult[] = [];
+    const visited = new Set<string>();
+
+    for (const root of walkRoots) {
+      if (results.length >= cap) break;
+      await this.bfsWalk(root, matcher, results, cap, visited);
+    }
+
+    return results;
+  }
+
+  private async bfsWalk(
+    walkRoot: string,
+    matcher: (s: string) => boolean,
+    results: FindResult[],
+    cap: number,
+    visited: Set<string>,
+  ): Promise<void> {
+    const queue: string[] = [walkRoot];
+
+    while (queue.length > 0 && results.length < cap) {
+      const dir = queue.shift()!;
+
+      // Cycle protection: realpath the directory we're about to read.
+      // Skip if we've seen its real form before. (Catches symlink chains
+      // that route back into already-walked territory.)
+      let realDir: string;
+      try {
+        realDir = await fs.realpath(dir);
+      } catch {
+        continue;
+      }
+      if (visited.has(realDir)) continue;
+      visited.add(realDir);
+
+      let dirents;
+      try {
+        dirents = await fs.readdir(dir, { withFileTypes: true });
+      } catch {
+        // Permission denied, vanished mid-walk, etc. Skip silently.
+        continue;
+      }
+
+      for (const ent of dirents) {
+        if (results.length >= cap) break;
+        if (this.basenameMatchesDeny(ent.name)) continue;
+
+        const full = path.join(dir, ent.name);
+        const rel = toPosixPath(path.relative(walkRoot, full));
+        const isSymlink = ent.isSymbolicLink();
+        const isDir = ent.isDirectory();
+        const isFile = ent.isFile();
+
+        if (matcher(ent.name) || matcher(rel)) {
+          results.push({
+            path: full,
+            type: isSymlink
+              ? "symlink"
+              : isDir
+                ? "dir"
+                : isFile
+                  ? "file"
+                  : "other",
+          });
+        }
+
+        if (isDir && !isSymlink) {
+          queue.push(full);
+        } else if (isSymlink) {
+          // Resolve the symlink. Follow only when the target is inside
+          // some configured root. Queue the SYMLINK path (not the realpath)
+          // so descendant paths stay route-through-the-link;
+          // visited-set dedup uses the realpath at dequeue time.
+          let target: string;
+          try {
+            target = await fs.realpath(full);
+          } catch {
+            continue;
+          }
+          if (!this.isInRoots(target)) continue;
+          if (visited.has(target)) continue;
+          try {
+            const targetStat = await fs.stat(target);
+            if (targetStat.isDirectory()) {
+              queue.push(full);
+            }
+          } catch {
+            // dangling, race, permission — skip
+          }
+        }
+      }
+    }
+  }
 
   // ---- TODO (see HANDOFF.md): write ops — move, copy, delete, mkdir ----
   // All write methods MUST:
