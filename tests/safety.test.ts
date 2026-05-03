@@ -74,6 +74,16 @@ describe("FilesystemClient safety primitives", () => {
       expect(resolved).toBe(target);
     });
 
+    it("with mustExist=false, walks up multiple missing ancestors until an existing one is found in roots", async () => {
+      // Used by recursive mkdir: target itself, its parent, and its
+      // grandparent are all missing — but the (first existing) ancestor
+      // sits inside `root`, so the path is allowed.
+      const client = makeClient([root]);
+      const target = path.join(root, "a", "b", "c");
+      const resolved = await client.assertWithinRoots(target, false);
+      expect(resolved).toBe(target);
+    });
+
     it("with mustExist=false, still rejects a non-existent leaf whose parent is outside roots", async () => {
       const client = makeClient([root]);
       const outside = await fs.realpath(os.tmpdir());

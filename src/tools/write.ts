@@ -1,26 +1,20 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { FilesystemClient } from "../clients/filesystem.js";
+import { asText } from "../util.js";
 
 /**
  * Registers mutation MCP tools backed by FilesystemClient.
  *
- * Only called when FS_ALLOW_WRITE=true at startup. Even then, every
- * tool here is a stub returning a "not implemented" error — see
- * HANDOFF.md for acceptance criteria. Implement them with:
- *
- *   - assertWithinRoots() validation on every path argument
- *     (sources mustExist=true, destinations mustExist=false)
- *   - dry_run support that returns a "would happen" object without
- *     touching the filesystem
- *   - clear, bounded behavior for symlink crossing during recursive
- *     delete (refuse, by default, anything resolving outside roots)
+ * Only called when FS_ALLOW_WRITE=true at startup. Each tool takes a
+ * `dry_run` parameter that defaults to true at the schema level —
+ * callers must opt into actual mutation per call. Path arguments are
+ * validated with `assertWithinRoots()` (sources mustExist=true,
+ * destinations mustExist=false) and `assertNotDenied()` for basenames.
  */
 export function registerWriteTools(
   server: McpServer,
-  // Underscore prefix: client is unused in the scaffold stubs but the
-  // dev chat will need it for real implementations.
-  _fs: FilesystemClient,
+  fs: FilesystemClient,
 ): void {
   server.registerTool(
     "fs_move",
@@ -91,17 +85,33 @@ export function registerWriteTools(
     {
       title: "Filesystem: Make Directory",
       description:
-        "[NOT YET IMPLEMENTED — see HANDOFF.md] Create a directory. Path's parent must exist under FS_ROOTS. With recursive=true, creates intermediate parents (each must remain under FS_ROOTS). Honors `dry_run`.",
+        "Create a directory. The target path must resolve inside one of the configured FS_ROOTS, and its basename must not match FS_DENY_FILE_PATTERNS. With recursive=true, missing parent directories are created in one operation. Idempotent on an existing directory (returns paths_to_create=[]); refuses if the target already exists as a regular file. Returns the path list it would (or did) create. Honors dry_run.",
       inputSchema: {
-        path: z.string(),
-        recursive: z.boolean().optional(),
-        dry_run: z.boolean().optional(),
+        path: z
+          .string()
+          .describe(
+            "Absolute path to the directory to create (parent must already exist unless recursive=true).",
+          ),
+        recursive: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Create missing parent directories. Default false — non-recursive mkdir requires the parent to already exist.",
+          ),
+        dry_run: z
+          .boolean()
+          .default(true)
+          .describe(
+            "Preview without creating anything. Default true — opt in to actual mutation per call by passing false.",
+          ),
       },
     },
-    async () => {
-      throw new Error(
-        "fs_mkdir not implemented yet — see HANDOFF.md for acceptance criteria",
-      );
-    },
+    async ({ path: p, recursive, dry_run }) =>
+      asText(
+        await fs.mkdir(p, {
+          recursive,
+          dryRun: dry_run,
+        }),
+      ),
   );
 }
