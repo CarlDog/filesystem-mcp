@@ -757,7 +757,22 @@ export class FilesystemClient {
     const overwrite = opts.overwrite ?? false;
     const dryRun = opts.dryRun ?? true;
 
-    const from = await this.assertWithinRoots(fromInput, true);
+    // Resolve the source. When dereference=false and the source is a
+    // symlink, we must NOT follow the link (otherwise fs.cp would copy
+    // the target's bytes instead of duplicating the link). Validate
+    // scope via the parent's realpath in that case.
+    const fromAbs = path.resolve(fromInput);
+    let from: string;
+    const fromLstat = await fs.lstat(fromAbs).catch(() => null);
+    if (fromLstat && fromLstat.isSymbolicLink() && !dereference) {
+      const parentReal = await fs.realpath(path.dirname(fromAbs));
+      if (!this.isInRoots(parentReal)) {
+        throw new Error(`path escapes configured FS_ROOTS: ${fromInput}`);
+      }
+      from = path.join(parentReal, path.basename(fromAbs));
+    } else {
+      from = await this.assertWithinRoots(fromInput, true);
+    }
     this.assertNotDenied(path.basename(from));
 
     const to = await this.assertWithinRoots(toInput, false);
