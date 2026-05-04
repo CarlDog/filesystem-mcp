@@ -1,15 +1,15 @@
 # Status
 
-**Last updated:** 2026-05-03
+**Last updated:** 2026-05-04
 
 ## Phase
 
 All five read tools fully working: `fs_list_roots`, `fs_list_directory`,
-`fs_stat`, `fs_read_file`, `fs_find_by_glob`. Two write tools
-implemented (`fs_mkdir`, `fs_move`) with `dry_run` default-true and
-`FS_ALLOW_WRITE` gate. Two write tools still stubbed (`fs_copy`,
-`fs_delete`). Vitest suite — 52 tests passing on Windows + Linux +
-macOS in CI (7 symlink tests skip on Windows). See
+`fs_stat`, `fs_read_file`, `fs_find_by_glob`. Three write tools
+implemented (`fs_mkdir`, `fs_move`, `fs_copy`) with `dry_run`
+default-true and `FS_ALLOW_WRITE` gate. One write tool still stubbed
+(`fs_delete`). Vitest suite — 65 tests passing on Windows + Linux +
+macOS in CI (9 symlink tests skip on Windows). See
 [HANDOFF.md](HANDOFF.md) for acceptance criteria per remaining tool.
 
 ## Done
@@ -44,9 +44,17 @@ macOS in CI (7 symlink tests skip on Windows). See
   flag (NOT atomic). Refuses symlink sources to avoid dangling links.
   Refuses directory destinations regardless of overwrite. Refuses
   file destinations unless `overwrite=true`. Deny-pattern checked on
-  both basenames.
-- Two write-tool stubs remaining (only registered when
-  `FS_ALLOW_WRITE=true`): `fs_copy`, `fs_delete`.
+  both basenames. Cross-device path detected upfront by comparing
+  device IDs; size guard applied to cross-device case.
+- `fs_copy` implemented: walks source tree up-front and refuses with
+  a clear error if it exceeds `config.maxCopyEntries` (default 10k)
+  or `config.maxCopyBytes` (default 500 GiB). Error message points
+  the caller at rsync or per-subdirectory iteration via
+  fs_find_by_glob. Refuses non-recursive directory copy. Refuses
+  directory destinations regardless of overwrite. Symlinks copied
+  as symlinks by default (dereference opt-in).
+- One write-tool stub remaining (only registered when
+  `FS_ALLOW_WRITE=true`): `fs_delete`.
 - McpServer ships with a populated `instructions` field (server-level
   prose handed to the LLM at session init) — covers idioms, safety
   story, and composition with sister MCPs.
@@ -91,7 +99,8 @@ acceptance criteria. Summary:
 4. ~~Add vitest tests with a temp-dir sandbox helper~~ — done; CI
    runs `npm test` across all three OSes.
 5. Implement write tools, **all gated on `dry_run` default true**, in
-   the order: ~~`fs_mkdir`~~ → ~~`fs_move`~~ → `fs_copy` → `fs_delete`.
+   the order: ~~`fs_mkdir`~~ → ~~`fs_move`~~ → ~~`fs_copy`~~ →
+   `fs_delete`.
 6. Wire into Claude Desktop / Claude Code at user scope.
 
 ## Open Decisions
