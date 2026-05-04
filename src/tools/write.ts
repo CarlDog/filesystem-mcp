@@ -111,18 +111,39 @@ export function registerWriteTools(
     {
       title: "Filesystem: Delete",
       description:
-        "[NOT YET IMPLEMENTED — see HANDOFF.md] Delete a file or directory. Path must resolve under FS_ROOTS. For directories, recursive=true required. Symlinks are removed by unlinking the link itself; targets are NOT followed. Honors `dry_run`.",
+        "Delete a file, directory, or symlink. Path must resolve inside FS_ROOTS. Symlinks are UNLINKED (the link itself, not its target) — even when encountered mid-tree during a recursive delete. Non-empty directories require recursive=true. TWO flags must be set to actually mutate: both dry_run=false AND confirm=true. This is the only write tool with the confirm flag because deletion is irreversible. Honors dry_run.",
       inputSchema: {
-        path: z.string(),
-        recursive: z.boolean().optional(),
-        dry_run: z.boolean().optional(),
+        path: z
+          .string()
+          .describe("Absolute path to delete (must exist, inside FS_ROOTS)."),
+        recursive: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Required to delete a non-empty directory. Default false. Symlinks are unlinked regardless (never traversed).",
+          ),
+        dry_run: z
+          .boolean()
+          .default(true)
+          .describe(
+            "Preview without deleting. Default true. To actually delete, pass dry_run=false AND confirm=true.",
+          ),
+        confirm: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Belt-and-suspenders flag REQUIRED alongside dry_run=false to actually mutate. Default false. Two independent flags must agree before any irreversible delete is performed.",
+          ),
       },
     },
-    async () => {
-      throw new Error(
-        "fs_delete not implemented yet — see HANDOFF.md for acceptance criteria",
-      );
-    },
+    async ({ path: p, recursive, dry_run, confirm }) =>
+      asText(
+        await fs.delete(p, {
+          recursive,
+          dryRun: dry_run,
+          confirm,
+        }),
+      ),
   );
 
   server.registerTool(
