@@ -4,13 +4,15 @@
 
 ## Phase
 
-All five read tools fully working: `fs_list_roots`, `fs_list_directory`,
-`fs_stat`, `fs_read_file`, `fs_find_by_glob`. Three write tools
-implemented (`fs_mkdir`, `fs_move`, `fs_copy`) with `dry_run`
-default-true and `FS_ALLOW_WRITE` gate. One write tool still stubbed
-(`fs_delete`). Vitest suite — 65 tests passing on Windows + Linux +
-macOS in CI (9 symlink tests skip on Windows). See
-[HANDOFF.md](HANDOFF.md) for acceptance criteria per remaining tool.
+All five read tools and all four write tools implemented:
+`fs_list_roots`, `fs_list_directory`, `fs_stat`, `fs_read_file`,
+`fs_find_by_glob`, `fs_mkdir`, `fs_move`, `fs_copy`, `fs_delete`.
+All write tools gated by `FS_ALLOW_WRITE` and default to `dry_run`;
+`fs_delete` additionally requires `confirm=true` to actually mutate.
+Vitest suite — 76 tests passing on Windows + Linux + macOS in CI
+(11 symlink tests skip on Windows). Read tools deployed to NAS;
+write tools tested locally + in CI but not yet enabled on the
+deployed stack (`FS_ALLOW_WRITE=false`).
 
 ## Done
 
@@ -52,9 +54,19 @@ macOS in CI (9 symlink tests skip on Windows). See
   the caller at rsync or per-subdirectory iteration via
   fs_find_by_glob. Refuses non-recursive directory copy. Refuses
   directory destinations regardless of overwrite. Symlinks copied
-  as symlinks by default (dereference opt-in).
-- One write-tool stub remaining (only registered when
-  `FS_ALLOW_WRITE=true`): `fs_delete`.
+  as symlinks by default (dereference opt-in). Bug fix worth noting:
+  `assertWithinRoots` realpath's through symlinks; the copy path
+  bypasses that for symlink sources when dereference=false to keep
+  the link intact (otherwise fs.cp would copy the target, not the
+  link). Same pattern reused by fs_delete.
+- `fs_delete` implemented: two-flag mutation gate (`dry_run=false`
+  AND `confirm=true` both required to actually delete — only write
+  tool with this extra flag, since delete is the only irreversible
+  op). Symlinks always unlinked (never traversed) — even mid-tree
+  during recursive deletes, so a symlink pointing OUTSIDE FS_ROOTS
+  cannot be used to reach external files. Empty dirs delete without
+  `recursive`; non-empty dirs require it. No size guard (`fs.rm`
+  is fast even on huge trees, unlike fs_copy).
 - McpServer ships with a populated `instructions` field (server-level
   prose handed to the LLM at session init) — covers idioms, safety
   story, and composition with sister MCPs.
@@ -98,10 +110,11 @@ acceptance criteria. Summary:
    `FS_VOLUME=/volume1/Media:/media:ro`.
 4. ~~Add vitest tests with a temp-dir sandbox helper~~ — done; CI
    runs `npm test` across all three OSes.
-5. Implement write tools, **all gated on `dry_run` default true**, in
-   the order: ~~`fs_mkdir`~~ → ~~`fs_move`~~ → ~~`fs_copy`~~ →
-   `fs_delete`.
-6. Wire into Claude Desktop / Claude Code at user scope.
+5. ~~Implement write tools~~ — done. `fs_mkdir`, `fs_move`,
+   `fs_copy`, `fs_delete` all implemented, tested, CI-green.
+6. Decide whether/when to enable `FS_ALLOW_WRITE=true` on the deployed
+   stack. The deploy currently exposes only the 5 read tools.
+7. Wire into Claude Desktop / Claude Code at user scope.
 
 ## Open Decisions
 

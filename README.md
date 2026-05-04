@@ -8,9 +8,10 @@ move/copy/delete. Designed as a companion to media-management MCPs
 reconcile "what should be on disk" against "what's actually there",
 and — when explicitly enabled — fix the differences.
 
-> **This repo is mid-build.** All five read tools work; the four
-> write tools are registered as stubs. See [HANDOFF.md](HANDOFF.md)
-> for the implementation plan.
+> **All five read tools and four write tools implemented.** Write
+> tools default to `dry_run=true`; `fs_delete` additionally requires
+> `confirm=true`. The deployed stack exposes only the read tools
+> until `FS_ALLOW_WRITE=true` is flipped explicitly.
 
 ## Tools
 
@@ -30,7 +31,7 @@ and — when explicitly enabled — fix the differences.
 | --- | --- | --- |
 | `fs_move` | ✅ implemented | Move or rename a path (`dry_run` defaults true) |
 | `fs_copy` | ✅ implemented | Copy a file or directory (`dry_run` defaults true; refuses trees over 10k entries / 500 GiB) |
-| `fs_delete` | 🟡 stub | Delete a path (`dry_run` defaults true; recursive opt-in) |
+| `fs_delete` | ✅ implemented | Delete a path (`dry_run` defaults true; `recursive` opt-in for non-empty dirs; **`confirm: true` REQUIRED alongside `dry_run: false` to actually mutate**) |
 | `fs_mkdir` | ✅ implemented | Create a directory (`dry_run` defaults true; recursive opt-in) |
 
 ## Configuration
