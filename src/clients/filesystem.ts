@@ -71,6 +71,23 @@ export interface FileStat {
   symlinkTarget?: string;
 }
 
+export interface DeleteResult {
+  /** Resolved path of the target (symlink path itself when input was a symlink). */
+  path: string;
+  /** What was at that path. */
+  type: "file" | "dir" | "symlink" | "other";
+  /** Echo of recursive flag. */
+  recursive: boolean;
+  /** Echo of dry_run. */
+  dry_run: boolean;
+  /** True iff dry_run was false AND confirm was true (operation actually executed). */
+  performed: boolean;
+  /** Count of entries that would be (or were) unlinked, including the target itself. */
+  paths_to_delete: number;
+  /** Sum of file sizes in the subtree. Symlinks count as 0 (link itself, not target). */
+  bytes_to_delete: number;
+}
+
 export interface CopyResult {
   /** Realpath-resolved canonical source path. */
   from: string;
@@ -963,6 +980,97 @@ export class FilesystemClient {
         `For full-library reorganization, use rsync directly. ` +
         `For multiple smaller items, iterate per-subdirectory: enumerate via fs_find_by_glob, then call fs_copy on each result.`,
     );
+  }
+
+  /**
+   * Delete a file, directory, or symlink. Symlinks are unlinked (the
+   * link itself), never traversed — even when encountered mid-tree
+   * during a recursive delete. Non-empty directories require
+   * `recursive: true`.
+   *
+   * Two-flag mutation gate: `dry_run=false` AND `confirm=true` are
+   * BOTH required to actually delete. This is the only write tool
+   * with `confirm` because deletion is the only irreversible op.
+   */
+  async delete(
+    inputPath: string,
+    opts: { recursive?: boolean; dryRun?: boolean; confirm?: boolean } = {},
+  ): Promise<DeleteResult> {
+    if (!this.config.allowWrite) {
+      throw new Error("write operations are disabled (FS_ALLOW_WRITE=false)");
+    }
+    const recursive = opts.recursive ?? false;
+    const dryRun = opts.dryRun ?? true;
+    const confirm = opts.confirm ?? false;
+
+    if (!dryRun && !confirm) {
+      throw new Error(
+        "fs_delete refuses to mutate without confirm=true. Set both " +
+          "dry_run=false AND confirm=true to actually delete. Use " +
+          "dry_run=true to preview paths_to_delete and bytes_to_delete first.",
+      );
+    }
+
+    // Resolve the target. If it's a symlink, we MUST keep the symlink
+    // path intact (otherwise we'd unlink the target file, not the link).
+    const targetAbs = path.resolve(inputPath);
+    let target: string;
+    const targetLstat = await fs.lstat(targetAbs);
+    if (targetLstat.isSymbolicLink()) {
+      const parentReal = await fs.realpath(path.dirname(targetAbs));
+      if (!this.isInRoots(parentReal)) {
+        throw new Error(`path escapes configured FS_ROOTS: ${inputPath}`);
+      }
+      target = path.join(parentReal, path.basename(targetAbs));
+    } else {
+      target = await this.assertWithinRoots(inputPath, true);
+    }
+    this.assertNotDenied(path.basename(target));
+
+    const targetType: DeleteResult["type"] = targetLstat.isSymbolicLink()
+      ? "symlink"
+      : targetLstat.isDirectory()
+        ? "dir"
+        : targetLstat.isFile()
+          ? "file"
+          : "other";
+
+    // Walk the tree to count entries + bytes (no caps — fs.rm is fast
+    // even on huge trees; transport timeout isn't a risk here).
+    // assessCopyTree with dereference=false is the same walk we want:
+    // count each entry once, sum file bytes, never follow symlinks.
+    const summary = await this.assessCopyTree(
+      target,
+      Number.MAX_SAFE_INTEGER,
+      Number.MAX_SAFE_INTEGER,
+      false,
+    );
+
+    // Refuse non-empty dir without recursive=true. summary.entries
+    // includes the target itself (1) plus its descendants. So a
+    // non-empty dir has entries > 1.
+    if (targetLstat.isDirectory() && summary.entries > 1 && !recursive) {
+      throw new Error(
+        `directory is not empty (${summary.entries - 1} entries inside); pass recursive=true to delete contents: ${target}`,
+      );
+    }
+
+    if (!dryRun) {
+      // recursive=true handles all cases (file, empty dir, non-empty dir,
+      // symlink). fs.rm with recursive does NOT follow symlinks — it
+      // unlinks them. force=true silences ENOENT (race-tolerant).
+      await fs.rm(target, { recursive: true, force: true });
+    }
+
+    return {
+      path: target,
+      type: targetType,
+      recursive,
+      dry_run: dryRun,
+      performed: !dryRun,
+      paths_to_delete: summary.entries,
+      bytes_to_delete: summary.bytes,
+    };
   }
 }
 
