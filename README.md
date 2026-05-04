@@ -29,7 +29,7 @@ and — when explicitly enabled — fix the differences.
 | Tool | Status | Description |
 | --- | --- | --- |
 | `fs_move` | ✅ implemented | Move or rename a path (`dry_run` defaults true) |
-| `fs_copy` | 🟡 stub | Copy a file or directory (`dry_run` defaults true) |
+| `fs_copy` | ✅ implemented | Copy a file or directory (`dry_run` defaults true; refuses trees over 10k entries / 500 GiB) |
 | `fs_delete` | 🟡 stub | Delete a path (`dry_run` defaults true; recursive opt-in) |
 | `fs_mkdir` | ✅ implemented | Create a directory (`dry_run` defaults true; recursive opt-in) |
 
