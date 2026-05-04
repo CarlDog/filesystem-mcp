@@ -4,15 +4,19 @@
 
 ## Phase
 
-All five read tools and all four write tools implemented:
-`fs_list_roots`, `fs_list_directory`, `fs_stat`, `fs_read_file`,
-`fs_find_by_glob`, `fs_mkdir`, `fs_move`, `fs_copy`, `fs_delete`.
+**Feature-complete and rolled out.** All nine tools deployed and
+registered with the operator's clients:
+- Read: `fs_list_roots`, `fs_list_directory`, `fs_stat`,
+  `fs_read_file`, `fs_find_by_glob`
+- Write: `fs_mkdir`, `fs_move`, `fs_copy`, `fs_delete`
+
 All write tools gated by `FS_ALLOW_WRITE` and default to `dry_run`;
 `fs_delete` additionally requires `confirm=true` to actually mutate.
 Vitest suite — 76 tests passing on Windows + Linux + macOS in CI
-(11 symlink tests skip on Windows). Read tools deployed to NAS;
-write tools tested locally + in CI but not yet enabled on the
-deployed stack (`FS_ALLOW_WRITE=false`).
+(11 symlink tests skip on Windows). Stack #152 on `your-nas` runs
+with `FS_VOLUME=/volume1/Media:/media:rw` and `FS_ALLOW_WRITE=true`;
+end-to-end smoke verified mkdir+stat+delete cycle against the live
+mount. Wired into Claude Code (user scope) and Claude Desktop config.
 
 ## Done
 
@@ -112,9 +116,17 @@ acceptance criteria. Summary:
    runs `npm test` across all three OSes.
 5. ~~Implement write tools~~ — done. `fs_mkdir`, `fs_move`,
    `fs_copy`, `fs_delete` all implemented, tested, CI-green.
-6. Decide whether/when to enable `FS_ALLOW_WRITE=true` on the deployed
-   stack. The deploy currently exposes only the 5 read tools.
-7. Wire into Claude Desktop / Claude Code at user scope.
+6. ~~Enable `FS_ALLOW_WRITE=true` on the deployed stack~~ — done.
+   Stack #152 now runs with `:rw` mount and write tools registered.
+   Live smoke (mkdir → stat → delete) verified.
+7. ~~Wire into Claude Desktop / Claude Code at user scope~~ — done.
+   Claude Code: `claude mcp add` user-scope HTTP. Claude Desktop:
+   `filesystem` entry in `claude_desktop_config.json` alongside
+   sister MCPs.
+
+All HANDOFF.md items closed. Next move-forward work would be
+out-of-scope feature additions (e.g. fs_copy_many for batched small
+items, env-tunable copy limits, operator-side allowlist refinements).
 
 ## Open Decisions
 
