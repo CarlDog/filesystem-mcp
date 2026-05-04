@@ -62,6 +62,8 @@ export function makeClient(
     allowWrite: false,
     maxReadBytes: 1024 * 1024,
     maxListEntries: 1000,
+    maxCopyEntries: 10_000,
+    maxCopyBytes: 500 * 1024 * 1024 * 1024,
     ...overrides,
   });
 }

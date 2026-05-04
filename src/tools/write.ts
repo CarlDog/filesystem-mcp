@@ -61,22 +61,49 @@ export function registerWriteTools(
     {
       title: "Filesystem: Copy",
       description:
-        "[NOT YET IMPLEMENTED — see HANDOFF.md] Copy a file or directory. Both `from` and `to` must resolve under FS_ROOTS. For directories, copy is recursive. Honors `dry_run`.",
+        "Copy a file or directory. Both paths must resolve under FS_ROOTS, and neither basename may match FS_DENY_FILE_PATTERNS. The source tree is walked up-front and the operation is REFUSED if it exceeds the configured per-call limits (FS_MAX_COPY_ENTRIES, FS_MAX_COPY_BYTES) — this MCP is not the right tool for large-scale moves; use rsync or iterate per-subdirectory. Refuses non-recursive copy of a directory. Refuses destinations that exist as a directory. Refuses existing file destinations unless overwrite=true. Symlinks are copied AS symlinks by default (the link itself, not its target); pass dereference=true to follow. Honors dry_run.",
       inputSchema: {
-        from: z.string(),
-        to: z.string(),
+        from: z.string().describe("Absolute source path (must exist)."),
+        to: z
+          .string()
+          .describe(
+            "Absolute destination path. Parent must exist inside FS_ROOTS.",
+          ),
         recursive: z
           .boolean()
-          .optional()
-          .describe("Required for directories. Default false."),
-        dry_run: z.boolean().optional(),
+          .default(false)
+          .describe(
+            "Required when copying a directory tree. Default false — non-recursive copy of a directory throws.",
+          ),
+        dereference: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Follow symlinks during copy (real bytes, not the link). Default false — symlinks are duplicated as symlinks.",
+          ),
+        overwrite: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Allow replacing an existing regular file at the destination. Never replaces a directory regardless. Default false.",
+          ),
+        dry_run: z
+          .boolean()
+          .default(true)
+          .describe(
+            "Preview without copying anything. Default true — opt in to actual mutation per call by passing false.",
+          ),
       },
     },
-    async () => {
-      throw new Error(
-        "fs_copy not implemented yet — see HANDOFF.md for acceptance criteria",
-      );
-    },
+    async ({ from, to, recursive, dereference, overwrite, dry_run }) =>
+      asText(
+        await fs.copy(from, to, {
+          recursive,
+          dereference,
+          overwrite,
+          dryRun: dry_run,
+        }),
+      ),
   );
 
   server.registerTool(

@@ -118,6 +118,12 @@ async function buildConfig(): Promise<FilesystemConfig> {
       1000,
       "FS_MAX_LIST_ENTRIES",
     ),
+    // Hardcoded for now — these are safety thresholds protecting against
+    // operations that would exceed transport timeouts. Promote to env
+    // vars (FS_MAX_COPY_ENTRIES / FS_MAX_COPY_BYTES) if an operator has
+    // a legitimate need to tune them.
+    maxCopyEntries: 10_000,
+    maxCopyBytes: 500 * 1024 * 1024 * 1024, // 500 GiB
   };
 }
 

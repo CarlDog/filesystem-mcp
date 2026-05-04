@@ -40,6 +40,17 @@ export interface FilesystemConfig {
   maxReadBytes: number;
   /** Cap on entries returned by listDirectory. */
   maxListEntries: number;
+  /**
+   * Hard refusal threshold for fs_copy and the EXDEV fallback in
+   * fs_move: source tree may not contain more than this many entries.
+   * Protects against operations that would exceed transport timeouts.
+   */
+  maxCopyEntries: number;
+  /**
+   * Hard refusal threshold for fs_copy and the EXDEV fallback in
+   * fs_move: source tree may not exceed this total byte size.
+   */
+  maxCopyBytes: number;
 }
 
 export interface DirEntry {
@@ -58,6 +69,34 @@ export interface FileStat {
   mode: string;
   isSymlink: boolean;
   symlinkTarget?: string;
+}
+
+export interface CopyResult {
+  /** Realpath-resolved canonical source path. */
+  from: string;
+  /** Resolved-canonical destination path. */
+  to: string;
+  /** Echo of recursive flag. */
+  recursive: boolean;
+  /** Echo of dereference flag (whether symlinks are followed). */
+  dereference: boolean;
+  /** Echo of dry_run. */
+  dry_run: boolean;
+  /** True iff dry_run was false. */
+  performed: boolean;
+  /** True when an existing entry at `to` would be (or was) replaced. */
+  would_overwrite: boolean;
+  /**
+   * Count of entries in the source tree (files + dirs + symlinks).
+   * Always under config.maxCopyEntries — operations that would exceed
+   * are refused before this is returned.
+   */
+  files_to_copy: number;
+  /**
+   * Total byte size of files in the source tree. Always under
+   * config.maxCopyBytes for the same reason.
+   */
+  bytes_to_copy: number;
 }
 
 export interface MoveResult {
@@ -628,7 +667,37 @@ export class FilesystemClient {
     }
 
     const wouldOverwrite = toLstat !== null;
-    let crossDevice = false;
+
+    // Detect cross-device up-front by comparing the source's device id
+    // against the destination's parent. The dry_run result reports this
+    // accurately (no surprise EXDEV at execution).
+    const fromStatForDev = await fs.lstat(from);
+    let toParentDev: number | null = null;
+    try {
+      const toParentStat = await fs.lstat(path.dirname(to));
+      toParentDev = toParentStat.dev;
+    } catch {
+      // parent doesn't exist — assertWithinRoots(to, false) would have
+      // already caught a parent-outside-roots case. If it doesn't exist
+      // for some other reason, the rename will fail downstream.
+    }
+    const crossDevice =
+      toParentDev !== null && fromStatForDev.dev !== toParentDev;
+
+    // For cross-device moves the fallback is copy+delete — apply the
+    // same hard size guard as fs_copy. Same-device renames are O(1)
+    // regardless of tree size, so they're unrestricted.
+    if (crossDevice) {
+      this.assertCopyTreeSizeOK(
+        await this.assessCopyTree(
+          from,
+          this.config.maxCopyEntries + 1,
+          this.config.maxCopyBytes + 1,
+          false,
+        ),
+        "fs_move (cross-device)",
+      );
+    }
 
     if (!dryRun) {
       try {
@@ -636,7 +705,6 @@ export class FilesystemClient {
       } catch (err) {
         const e = err as NodeJS.ErrnoException;
         if (e.code !== "EXDEV") throw err;
-        crossDevice = true;
         // Cross-device fallback. NOT atomic — flagged via `cross_device`.
         await fs.cp(from, to, {
           recursive: true,
@@ -655,6 +723,231 @@ export class FilesystemClient {
       would_overwrite: wouldOverwrite,
       cross_device: crossDevice,
     };
+  }
+
+  /**
+   * Copy `from` → `to`. Walks the source tree to refuse operations
+   * that would exceed `config.maxCopyEntries` or `config.maxCopyBytes`
+   * (transport-timeout protection — for whole-library moves use rsync
+   * directly or iterate per-subdirectory).
+   *
+   * Refuses non-recursive copy of a directory (caller must opt in).
+   * Refuses destinations that exist as a directory regardless of
+   * overwrite. Refuses existing file destinations unless overwrite=true.
+   *
+   * Symlinks: by default copied AS symlinks (link itself is duplicated,
+   * target untouched). With dereference=true, the target is followed
+   * and a real copy is produced.
+   */
+  async copy(
+    fromInput: string,
+    toInput: string,
+    opts: {
+      recursive?: boolean;
+      dereference?: boolean;
+      overwrite?: boolean;
+      dryRun?: boolean;
+    } = {},
+  ): Promise<CopyResult> {
+    if (!this.config.allowWrite) {
+      throw new Error("write operations are disabled (FS_ALLOW_WRITE=false)");
+    }
+    const recursive = opts.recursive ?? false;
+    const dereference = opts.dereference ?? false;
+    const overwrite = opts.overwrite ?? false;
+    const dryRun = opts.dryRun ?? true;
+
+    const from = await this.assertWithinRoots(fromInput, true);
+    this.assertNotDenied(path.basename(from));
+
+    const to = await this.assertWithinRoots(toInput, false);
+    this.assertNotDenied(path.basename(to));
+
+    // Inspect source — refuse non-recursive copy of a directory.
+    const fromStat = await fs.lstat(from);
+    if (fromStat.isDirectory() && !recursive) {
+      throw new Error(
+        `fs_copy refuses to copy a directory without recursive=true: ${from}`,
+      );
+    }
+
+    // Inspect destination state.
+    let toLstat: Awaited<ReturnType<typeof fs.lstat>> | null = null;
+    try {
+      toLstat = await fs.lstat(to);
+    } catch {
+      // doesn't exist — fine
+    }
+    if (toLstat) {
+      if (toLstat.isDirectory()) {
+        throw new Error(`destination already exists as a directory: ${to}`);
+      }
+      if (!overwrite) {
+        throw new Error(
+          `destination exists; pass overwrite=true to replace: ${to}`,
+        );
+      }
+    }
+    const wouldOverwrite = toLstat !== null;
+
+    // Walk + size assessment. Refuse if it exceeds limits.
+    const summary = await this.assessCopyTree(
+      from,
+      this.config.maxCopyEntries + 1,
+      this.config.maxCopyBytes + 1,
+      dereference,
+    );
+    this.assertCopyTreeSizeOK(summary, "fs_copy");
+
+    if (!dryRun) {
+      await fs.cp(from, to, {
+        recursive,
+        dereference,
+        force: overwrite,
+        errorOnExist: !overwrite,
+        preserveTimestamps: true,
+      });
+    }
+
+    return {
+      from,
+      to,
+      recursive,
+      dereference,
+      dry_run: dryRun,
+      performed: !dryRun,
+      would_overwrite: wouldOverwrite,
+      files_to_copy: summary.entries,
+      bytes_to_copy: summary.bytes,
+    };
+  }
+
+  /**
+   * BFS walk of `from` accumulating entry count + total bytes.
+   * Stops as soon as either cap is exceeded — caller checks
+   * `truncated` to decide whether to refuse.
+   *
+   * Symlinks: when dereference=false, each symlink counts as 1 entry
+   * with 0 bytes (the link itself); the walker does not descend into
+   * symlinked directories. When dereference=true, the walker follows
+   * symlinks via realpath and counts the target's contents.
+   */
+  private async assessCopyTree(
+    from: string,
+    entryCap: number,
+    byteCap: number,
+    dereference: boolean,
+  ): Promise<{ entries: number; bytes: number; truncated: boolean }> {
+    let entries = 0;
+    let bytes = 0;
+
+    const initialStat = dereference
+      ? await fs.stat(from)
+      : await fs.lstat(from);
+
+    if (!initialStat.isDirectory()) {
+      // Regular file or symlink leaf — single-entry copy.
+      entries = 1;
+      bytes = initialStat.isFile() ? initialStat.size : 0;
+      return {
+        entries,
+        bytes,
+        truncated: entries > entryCap || bytes > byteCap,
+      };
+    }
+
+    // Directory: count it then walk.
+    entries = 1;
+    const visited = new Set<string>();
+    const queue: string[] = [from];
+
+    while (queue.length > 0) {
+      if (entries > entryCap || bytes > byteCap) {
+        return { entries, bytes, truncated: true };
+      }
+      const dir = queue.shift()!;
+
+      // Cycle protection (matters when dereferencing).
+      try {
+        const real = await fs.realpath(dir);
+        if (visited.has(real)) continue;
+        visited.add(real);
+      } catch {
+        continue;
+      }
+
+      let dirents;
+      try {
+        dirents = await fs.readdir(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const ent of dirents) {
+        entries++;
+        if (entries > entryCap) {
+          return { entries, bytes, truncated: true };
+        }
+        const full = path.join(dir, ent.name);
+
+        if (ent.isSymbolicLink()) {
+          if (!dereference) continue; // symlink itself: no bytes
+          let target;
+          try {
+            target = await fs.stat(full); // follows link
+          } catch {
+            continue;
+          }
+          if (target.isFile()) {
+            bytes += target.size;
+          } else if (target.isDirectory()) {
+            queue.push(full);
+          }
+        } else if (ent.isFile()) {
+          try {
+            const st = await fs.lstat(full);
+            bytes += st.size;
+          } catch {
+            // vanished mid-walk
+          }
+        } else if (ent.isDirectory()) {
+          queue.push(full);
+        }
+
+        if (bytes > byteCap) {
+          return { entries, bytes, truncated: true };
+        }
+      }
+    }
+
+    return { entries, bytes, truncated: false };
+  }
+
+  private assertCopyTreeSizeOK(
+    summary: { entries: number; bytes: number; truncated: boolean },
+    opName: string,
+  ): void {
+    const overEntries = summary.entries > this.config.maxCopyEntries;
+    const overBytes = summary.bytes > this.config.maxCopyBytes;
+    if (!overEntries && !overBytes) return;
+
+    const reasons: string[] = [];
+    if (overEntries) {
+      reasons.push(
+        `entry count ${summary.entries}${summary.truncated ? "+" : ""} exceeds limit ${this.config.maxCopyEntries}`,
+      );
+    }
+    if (overBytes) {
+      reasons.push(
+        `total bytes ${summary.bytes}${summary.truncated ? "+" : ""} exceeds limit ${this.config.maxCopyBytes}`,
+      );
+    }
+    throw new Error(
+      `${opName} refused: source tree too large (${reasons.join("; ")}). ` +
+        `This MCP does not support large-scale copies because they exceed transport timeouts. ` +
+        `For full-library reorganization, use rsync directly. ` +
+        `For multiple smaller items, iterate per-subdirectory: enumerate via fs_find_by_glob, then call fs_copy on each result.`,
+    );
   }
 }
 
