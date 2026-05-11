@@ -90,10 +90,12 @@ unset rather than silently mounting nothing. There is no default
 because deployment paths vary (`/volume1/Media` is Synology-specific;
 `/srv/...` for many Linux setups; etc.).
 
-For multi-root deploys, extend the `volumes:` list in
-`docker-compose.yml` with additional entries (e.g. `${FS_VOLUME_2}`)
-and set the matching env vars. `FS_ROOTS` is then comma-separated:
-`FS_ROOTS=/media,/photos`.
+For multi-root deploys, `FS_VOLUME_2` and `FS_VOLUME_3` slots are
+already wired into the compose. Set them to additional bind specs
+(same `host:container[:flags]` format) and update `FS_ROOTS` to
+list every mounted path, comma-separated:
+`FS_ROOTS=/media,/portainer-compose`. Unset slots default to a
+no-op `/dev/null:/dev/null:ro` sentinel mount.
 
 ## Use with Claude Desktop / Claude Code
 
