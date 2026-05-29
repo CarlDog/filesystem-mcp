@@ -38,7 +38,7 @@ and — when explicitly enabled — fix the differences.
 
 | Var | Required | Notes |
 | --- | --- | --- |
-| `FS_ROOTS` | yes | Comma-separated absolute paths the MCP may operate on |
+| `FS_ROOTS` | no | Comma-separated absolute paths the MCP may operate on. **Defaults to the container-side targets of the `FS_VOLUME*` mounts** when unset — set it explicitly only to _narrow_ below the full mount list. |
 | `FS_ALLOW_WRITE` | no | `true` to register write tools. Default `false`. |
 | `FS_DENY_FILE_PATTERNS` | no | Glob patterns (basename) excluded from list/read. Default covers `.env`, `*.key`, `id_rsa*`, etc. Empty value disables. |
 | `FS_MAX_READ_BYTES` | no | Cap on `fs_read_file` (default 1 MiB; 0 disables) |
@@ -58,7 +58,12 @@ Two enforcement layers inside `FilesystemClient`:
 
 Plus a third on top, by deployment shape: **only mount what you want
 exposed.** The container only sees what `docker-compose.yml` mounts.
-`FS_ROOTS` then scopes inside that.
+`FS_ROOTS` then scopes inside that — and by default it _is_ the mount
+list (derived from the `FS_VOLUME*` targets), so the roots can't
+silently drift from what's actually mounted. An explicit `FS_ROOTS`
+overrides the default and can only narrow the exposed set (a root that
+isn't backed by a real directory in the container is logged and dropped
+at startup rather than crashing the server).
 
 ## Transport modes
 
@@ -74,9 +79,9 @@ exposed.** The container only sees what `docker-compose.yml` mounts.
 ```bash
 # Required: bind spec for the container's data mount, host:container[:flags]
 export FS_VOLUME=/volume1/Media:/media:ro
-# Required: which mounted-into-container paths the MCP may operate on
-export FS_ROOTS=/media
-# Optional:
+# Optional: FS_ROOTS defaults to the FS_VOLUME* targets (here, /media).
+# Set it only to narrow, e.g. expose a subtree of a broader mount.
+# export FS_ROOTS=/media
 # export FS_ALLOW_WRITE=true
 # export HOST_PORT=3006
 
@@ -92,10 +97,12 @@ because deployment paths vary (`/volume1/Media` is Synology-specific;
 
 For multi-root deploys, `FS_VOLUME_2` and `FS_VOLUME_3` slots are
 already wired into the compose. Set them to additional bind specs
-(same `host:container[:flags]` format) and update `FS_ROOTS` to
-list every mounted path, comma-separated:
-`FS_ROOTS=/media,/portainer-compose`. Unset slots default to a
-no-op `/dev/null:/dev/null:ro` sentinel mount.
+(same `host:container[:flags]` format) and the roots follow
+automatically — no second declaration to keep in sync. Unset slots
+default to a no-op `/dev/null:/dev/null:ro` sentinel mount (skipped
+when deriving roots). To expose only a subtree of a mount, set
+`FS_ROOTS` explicitly, e.g. mount `/volume1/docker:/docker` but set
+`FS_ROOTS=/media,/docker/portainer-ce` to scope down.
 
 ## Use with Claude Desktop / Claude Code
 

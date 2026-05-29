@@ -1,6 +1,6 @@
 # Status
 
-**Last updated:** 2026-05-04
+**Last updated:** 2026-05-29
 
 ## Phase
 
@@ -20,6 +20,20 @@ mount. Wired into Claude Code (user scope) and Claude Desktop config.
 
 ## Done
 
+- **Roots derivation + resilient startup (2026-05-29).** `FS_ROOTS` is
+  now optional: when unset, roots default to the container-side targets
+  of the `FS_VOLUME*` bind specs (`deriveRootsFromVolumes` in
+  `src/config.ts`), so each mount is declared once and the roots can't
+  drift from what's mounted. An explicit `FS_ROOTS` still wins and can
+  only narrow. Root validation moved to `resolveRoots` and is now
+  fail-soft: an invalid/unmounted root is logged to stderr and dropped
+  instead of `process.exit(1)`; the server only refuses to start when no
+  root survives. Fixes a crash-loop where a stale `FS_ROOTS` entry
+  (`/portainer-compose`, left over after the mounts were broadened to
+  `/docker` + `/logs`) took the whole server down. `src/config.ts`
+  extracted to make this logic unit-testable; 13 tests added in
+  `tests/config.test.ts`. `docker-compose.yml` now passes `FS_VOLUME*`
+  into the container env so the server can read them.
 - Repo initialized with TypeScript + MCP SDK + dual-transport entry,
   matching the architectural pattern of the sister MCPs.
 - `FilesystemClient` with both safety primitives implemented:

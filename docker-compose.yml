@@ -8,25 +8,36 @@ services:
       - "${HOST_PORT:-3006}:3000"
     environment:
       MCP_PORT: "3000"
-      FS_ROOTS: "${FS_ROOTS}"
+      # FS_ROOTS is optional: when unset, roots are derived from the
+      # container-side targets of FS_VOLUME* below (declare each mount
+      # once). Set it explicitly only to NARROW the exposed set.
+      FS_ROOTS: "${FS_ROOTS:-}"
+      # Passed through so the server can derive roots from the mounts.
+      FS_VOLUME: "${FS_VOLUME:-}"
+      FS_VOLUME_2: "${FS_VOLUME_2:-}"
+      FS_VOLUME_3: "${FS_VOLUME_3:-}"
       FS_ALLOW_WRITE: "${FS_ALLOW_WRITE:-false}"
       FS_DENY_FILE_PATTERNS: "${FS_DENY_FILE_PATTERNS:-*.env,*.key,*.pem,*.pfx,*.p12,id_rsa*,id_dsa*,id_ecdsa*,id_ed25519*,known_hosts,authorized_keys,.htpasswd,*.kdbx}"
       FS_MAX_READ_BYTES: "${FS_MAX_READ_BYTES:-1048576}"
       FS_MAX_LIST_ENTRIES: "${FS_MAX_LIST_ENTRIES:-1000}"
     # IMPORTANT: mount your data into the container.
     #
-    # The container can ONLY see what you mount, and FS_ROOTS scopes
-    # *within* what's mounted. The bind specs are parameterized — set
-    # FS_VOLUME on the stack/env to a `host:container[:flags]` string,
-    # e.g. `/volume1/Media:/media:ro`. The compose deploy will fail
-    # loudly if FS_VOLUME is unset (no silent empty-mount surprises).
+    # The container can ONLY see what you mount. Set FS_VOLUME on the
+    # stack/env to a `host:container[:flags]` string, e.g.
+    # `/volume1/Media:/media:ro`. The compose deploy will fail loudly if
+    # FS_VOLUME is unset (no silent empty-mount surprises).
     #
-    # For multiple roots: set FS_VOLUME_2 / _3 to additional bind
-    # specs in the same format. They're optional — when unset, the
-    # sentinel `/dev/null:/dev/null:ro` no-op mount is used (harmless;
-    # Docker is happy to bind /dev/null read-only as a placeholder).
-    # FS_ROOTS should then list every mounted-into-container path,
-    # comma-separated (e.g. `FS_ROOTS=/media,/portainer-compose`).
+    # For multiple mounts: set FS_VOLUME_2 / _3 to additional bind specs
+    # in the same format. They're optional — when unset, the sentinel
+    # `/dev/null:/dev/null:ro` no-op mount is used (harmless; Docker is
+    # happy to bind /dev/null read-only as a placeholder).
+    #
+    # Roots: by default FS_ROOTS is DERIVED from the container-side target
+    # of each FS_VOLUME* above (so `/media:ro` → root `/media`). Declare
+    # each mount once and the roots follow — they can't drift. Set
+    # FS_ROOTS explicitly only to NARROW the exposed set, e.g.
+    # `FS_ROOTS=/media,/docker/portainer-ce` to expose just a subtree of a
+    # broader mount.
     #
     # Read-only is strongly recommended until write tools are reviewed.
     volumes:
