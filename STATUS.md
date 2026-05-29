@@ -12,11 +12,13 @@ registered with the operator's clients:
 
 All write tools gated by `FS_ALLOW_WRITE` and default to `dry_run`;
 `fs_delete` additionally requires `confirm=true` to actually mutate.
-Vitest suite — 76 tests passing on Windows + Linux + macOS in CI
-(11 symlink tests skip on Windows). Stack #152 on `your-nas` runs
-with `FS_VOLUME=/volume1/Media:/media:rw` and `FS_ALLOW_WRITE=true`;
-end-to-end smoke verified mkdir+stat+delete cycle against the live
-mount. Wired into Claude Code (user scope) and Claude Desktop config.
+Vitest suite — 99 tests (88 pass on Windows where 11 symlink tests
+skip; all 99 on Linux + macOS CI). Stack #152 on `your-nas` runs
+three mounts — `/media` (rw, library reorg), `/docker` (rw, config
+edits), `/logs` (ro, troubleshooting) — with `FS_ALLOW_WRITE=true`
+and `FS_ROOTS=/media,/docker,/logs`. `/health` reports `roots:3,
+allow_write:true` and the container is verified healthy. Wired into
+Claude Code (user scope) and Claude Desktop config.
 
 ## Done
 
@@ -108,10 +110,10 @@ mount. Wired into Claude Code (user scope) and Claude Desktop config.
   Initial scaffold + .gitattributes pushed; CI workflows green.
 - Deployed as Portainer git stack (#152) on `your-nas` endpoint 2,
   pulling from `refs/heads/main`. Image:
-  `ghcr.io/carldog/filesystem-mcp:latest`. Mount: parameterized via
-  `FS_VOLUME` stack env (currently `/volume1/Media:/media:ro`).
-  Env: `FS_ROOTS=/media`, all other config at compose defaults
-  (write tools disabled).
+  `ghcr.io/carldog/filesystem-mcp:latest`. Initial deploy was a single
+  `/volume1/Media:/media:ro` mount with `FS_ROOTS=/media` and write
+  disabled; current mount/roots/write state is in the Phase section
+  above.
 - Smoke test passes end-to-end: `/health` returns `roots:1, allow_write:false`;
   MCP `initialize` succeeds and `tools/list` exposes the 5 read tools
   (no write tools registered, confirming the env-gate works); real
