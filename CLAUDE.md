@@ -28,6 +28,7 @@ The dev chat picking this up should read [HANDOFF.md](HANDOFF.md) first
 filesystem-mcp/
 ├── src/
 │   ├── index.ts                # entry: env parse, transport, McpServer + instructions
+│   ├── config.ts               # root parsing/derivation/resolution (parseRoots, deriveRootsFromVolumes, resolveRoots)
 │   ├── clients/
 │   │   └── filesystem.ts       # FilesystemClient: safety primitives + read/write methods
 │   ├── tools/
@@ -52,7 +53,12 @@ Two layers, both enforced inside `FilesystemClient`:
    path doesn't live under one of the configured roots. Roots are
    themselves realpath-resolved at startup so symlink-rooted entries are
    normalized once. Non-existent target paths (e.g. for `mkdir`, move
-   destinations) are validated against their parent.
+   destinations) are validated against their parent. When `FS_ROOTS` is
+   unset, roots default to the container-side targets of the `FS_VOLUME*`
+   bind specs (`deriveRootsFromVolumes` in `config.ts`) — one declaration,
+   no drift; an explicit `FS_ROOTS` overrides and can only narrow. Startup
+   is resilient: an invalid/unmounted root is logged and dropped rather
+   than aborting; the server only refuses to start if *no* root survives.
 2. **Deny-pattern (`FS_DENY_FILE_PATTERNS`).** Glob patterns matched
    against the basename. List operations silently filter matches; direct
    read/stat throws. Default patterns cover common sensitive file

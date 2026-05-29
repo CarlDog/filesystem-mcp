@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-import { promises as fsp } from "node:fs";
-import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -11,6 +9,7 @@ import {
   FilesystemClient,
   type FilesystemConfig,
 } from "./clients/filesystem.js";
+import { parseRoots, deriveRootsFromVolumes, resolveRoots } from "./config.js";
 import { registerFilesystemTools } from "./tools/index.js";
 
 const DEFAULT_DENY_PATTERNS = [
@@ -39,14 +38,6 @@ Idioms:
 
 Composition: this MCP is most useful paired with a domain MCP that knows what files SHOULD exist (e.g. servarr-mcp's *_list_movies returns paths). The agent reconciles "what's actually on disk" (this MCP) against "what's tracked" (the domain MCP).`;
 
-function parseRoots(raw: string | undefined): string[] {
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
 function parseDenyPatterns(raw: string | undefined): string[] {
   if (raw === undefined) return DEFAULT_DENY_PATTERNS;
   if (raw.trim().length === 0) return [];
@@ -71,36 +62,46 @@ function parseIntEnv(
 }
 
 async function buildConfig(): Promise<FilesystemConfig> {
-  const declaredRoots = parseRoots(process.env.FS_ROOTS);
+  // FS_ROOTS is the explicit allowlist. When it's unset, default to the
+  // container-side targets of the configured bind mounts (FS_VOLUME*),
+  // so the operator declares each mount exactly once and the roots can't
+  // drift from what's actually mounted. An explicit FS_ROOTS still wins,
+  // which lets it *narrow* the exposed set below the full mount list.
+  let declaredRoots = parseRoots(process.env.FS_ROOTS);
+  let rootsSource = "FS_ROOTS";
+  if (declaredRoots.length === 0) {
+    declaredRoots = deriveRootsFromVolumes([
+      process.env.FS_VOLUME,
+      process.env.FS_VOLUME_2,
+      process.env.FS_VOLUME_3,
+    ]);
+    rootsSource = "FS_VOLUME* (derived)";
+  }
   if (declaredRoots.length === 0) {
     console.error(
-      "FS_ROOTS environment variable is required (comma-separated absolute paths).",
+      "No roots configured: set FS_ROOTS (comma-separated absolute paths) " +
+        "or FS_VOLUME* bind specs to derive them from.",
     );
     process.exit(1);
   }
 
-  // Resolve roots through realpath() once at startup. Refuse non-absolute,
-  // non-existent, and non-directory entries — these are configuration
-  // mistakes that should fail loudly.
-  const resolvedRoots: string[] = [];
-  for (const r of declaredRoots) {
-    if (!path.isAbsolute(r)) {
-      console.error(`FS_ROOTS entries must be absolute paths: ${r}`);
-      process.exit(1);
-    }
-    let real: string;
-    try {
-      real = await fsp.realpath(r);
-    } catch {
-      console.error(`FS_ROOTS entry does not exist: ${r}`);
-      process.exit(1);
-    }
-    const st = await fsp.stat(real);
-    if (!st.isDirectory()) {
-      console.error(`FS_ROOTS entry is not a directory: ${r} (real: ${real})`);
-      process.exit(1);
-    }
-    resolvedRoots.push(real);
+  // Resolve roots through realpath() once at startup. Invalid entries
+  // (non-absolute, non-existent, non-directory) are logged and dropped
+  // rather than aborting — a single stale entry (e.g. a mount target that
+  // didn't get mounted) must not crash-loop the whole server. We only
+  // refuse to start if *no* valid root survives.
+  const { resolved: resolvedRoots, skipped } =
+    await resolveRoots(declaredRoots);
+  for (const s of skipped) {
+    console.error(
+      `filesystem-mcp: skipping invalid root "${s.root}" from ${rootsSource} (${s.reason})`,
+    );
+  }
+  if (resolvedRoots.length === 0) {
+    console.error(
+      `filesystem-mcp: no valid roots after validation (source: ${rootsSource}); refusing to start.`,
+    );
+    process.exit(1);
   }
 
   return {
