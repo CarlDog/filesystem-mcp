@@ -1,5 +1,10 @@
 # filesystem-mcp
 
+<!-- fleet-confidence -->
+![code confidence](https://img.shields.io/badge/code_confidence-fair-orange) <sub>· `claude-opus-4-8[1m]` · 2026-07-07 · [details](https://github.com/CarlDog/filesystem-mcp/issues/1)</sub>
+<!-- /fleet-confidence -->
+
+
 An [MCP](https://modelcontextprotocol.io) server exposing scoped
 filesystem operations — list, stat, read, glob, and (optionally)
 move/copy/delete. Designed as a companion to media-management MCPs
