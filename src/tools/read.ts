@@ -4,18 +4,10 @@ import { FilesystemClient } from "../clients/filesystem.js";
 import { asText } from "../util.js";
 
 /**
- * Registers read-only MCP tools backed by FilesystemClient.
- *
- * Two tools are fully implemented in the scaffold to prove the
- * env-var → path-validation → fs pipeline works end-to-end:
- *   - fs_list_roots
- *   - fs_list_directory
- *   - fs_stat
- *
- * The remainder are wired as registered tools that return a
- * "not implemented" error, so the dev chat can pick them up
- * incrementally without re-doing tool registration boilerplate.
- * See HANDOFF.md for signatures + acceptance criteria.
+ * Registers the read-only MCP tools backed by FilesystemClient:
+ * fs_list_roots, fs_list_directory, fs_stat, fs_read_file, and
+ * fs_find_by_glob. All fully implemented — safety (root containment,
+ * deny-patterns, caps) is enforced in the client, not here.
  */
 export function registerReadTools(
   server: McpServer,
