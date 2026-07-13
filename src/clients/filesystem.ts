@@ -317,7 +317,24 @@ export class FilesystemClient {
   }
 
   async stat(inputPath: string): Promise<FileStat> {
-    const real = await this.assertWithinRoots(inputPath);
+    // Observe the path itself, without following a final symlink —
+    // otherwise isSymlink/symlinkTarget could never be reported.
+    // Containment is still enforced: realpath+assert the PARENT
+    // directory, then lstat the basename joined onto its real form
+    // (same pattern as delete()'s symlink handling). Non-links get
+    // the full assertWithinRoots resolution as before.
+    const targetAbs = path.resolve(inputPath);
+    const targetLstat = await fs.lstat(targetAbs);
+    let real: string;
+    if (targetLstat.isSymbolicLink()) {
+      const parentReal = await fs.realpath(path.dirname(targetAbs));
+      if (!this.isInRoots(parentReal)) {
+        throw new Error(`path escapes configured FS_ROOTS: ${inputPath}`);
+      }
+      real = path.join(parentReal, path.basename(targetAbs));
+    } else {
+      real = await this.assertWithinRoots(inputPath);
+    }
     this.assertNotDenied(path.basename(real));
     const st = await fs.lstat(real);
     let symlinkTarget: string | undefined;
