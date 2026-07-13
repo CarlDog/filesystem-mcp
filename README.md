@@ -58,6 +58,10 @@ Two enforcement layers inside `FilesystemClient`:
 1. **Path scoping.** Every input path is resolved with
    `fs.realpath` (so symlinks are followed) and asserted to live under
    one of `FS_ROOTS`. Symlink targets that escape are rejected.
+   Exception: `fs_stat` (like `fs_delete`) observes a final symlink
+   itself rather than following it — the link's *parent* directory is
+   realpath-asserted to be inside the roots, then the link is lstat'd,
+   so `isSymlink`/`symlinkTarget` report the link without traversal.
 2. **Deny-pattern.** Basenames matching `FS_DENY_FILE_PATTERNS` are
    silently filtered from list results and refused for direct read/stat.
 

@@ -95,15 +95,37 @@ describe("FilesystemClient list/stat", () => {
           link: { __symlink: path.join(root, "real.txt") },
         });
         const client = makeClient([root]);
-        // assertWithinRoots resolves the symlink, so stat ends up on the target.
-        // To exercise the symlink branch, we have to not let realpath run on the
-        // input — but the safety contract DOES realpath. So in practice stat
-        // reports the resolved target's type. Regression check: we don't crash
-        // on resolved symlinks, and isSymlink is false because we lstat the
-        // already-resolved path.
+        // stat observes the link itself (lstat on the parent's realpath
+        // + basename) instead of following it, so the symlink branch is
+        // reachable: type=symlink, isSymlink=true, symlinkTarget set.
         const st = await client.stat(path.join(root, "link"));
-        expect(st.type).toBe("file");
-        expect(st.isSymlink).toBe(false);
+        expect(st.type).toBe("symlink");
+        expect(st.isSymlink).toBe(true);
+        expect(st.symlinkTarget).toBe(path.join(root, "real.txt"));
+        expect(st.path).toBe(path.join(root, "link"));
+      },
+    );
+
+    it.skipIf(skipSymlinks)(
+      "still rejects a symlink whose PARENT directory is outside roots",
+      async () => {
+        const { promises: nodeFs } = await import("node:fs");
+        const os = await import("node:os");
+        const outside = await nodeFs.mkdtemp(
+          path.join(os.tmpdir(), "fs-mcp-OUT-"),
+        );
+        try {
+          await nodeFs.symlink(
+            path.join(root, "whatever"),
+            path.join(outside, "link"),
+          );
+          const client = makeClient([root]);
+          await expect(
+            client.stat(path.join(outside, "link")),
+          ).rejects.toThrow(/escapes configured FS_ROOTS/);
+        } finally {
+          await nodeFs.rm(outside, { recursive: true, force: true });
+        }
       },
     );
 
