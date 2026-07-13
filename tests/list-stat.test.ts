@@ -120,9 +120,9 @@ describe("FilesystemClient list/stat", () => {
             path.join(outside, "link"),
           );
           const client = makeClient([root]);
-          await expect(
-            client.stat(path.join(outside, "link")),
-          ).rejects.toThrow(/escapes configured FS_ROOTS/);
+          await expect(client.stat(path.join(outside, "link"))).rejects.toThrow(
+            /escapes configured FS_ROOTS/,
+          );
         } finally {
           await nodeFs.rm(outside, { recursive: true, force: true });
         }
