@@ -55,8 +55,12 @@ function parseIntEnv(
   if (raw === undefined || raw === "") return fallback;
   const n = Number.parseInt(raw, 10);
   if (Number.isNaN(n) || n < 0) {
-    console.error(`Invalid ${name}: ${raw}`);
-    process.exit(1);
+    // Fail soft: a single malformed value must not crash-loop the
+    // server under restart: unless-stopped. Log and use the default.
+    console.error(
+      `filesystem-mcp: invalid ${name}: "${raw}" — using default ${fallback}`,
+    );
+    return fallback;
   }
   return n;
 }
@@ -150,10 +154,14 @@ function createServer(): McpServer {
 }
 
 const portStr = process.env.MCP_PORT;
-const port = portStr ? Number.parseInt(portStr, 10) : null;
+let port = portStr ? Number.parseInt(portStr, 10) : null;
 if (portStr && (port === null || Number.isNaN(port))) {
-  console.error(`Invalid MCP_PORT: ${portStr}`);
-  process.exit(1);
+  // Fail soft: don't crash-loop on a typo'd port. Fall back to stdio
+  // (the MCP_PORT-unset behavior) and say so loudly.
+  console.error(
+    `filesystem-mcp: invalid MCP_PORT: "${portStr}" — falling back to stdio transport`,
+  );
+  port = null;
 }
 
 if (port) {
