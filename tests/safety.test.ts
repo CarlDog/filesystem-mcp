@@ -103,6 +103,16 @@ describe("FilesystemClient safety primitives", () => {
       expect(() => client.assertNotDenied("id_rsa")).toThrow();
     });
 
+    it("matches deny patterns case-insensitively", () => {
+      const client = makeClient([root]);
+      expect(() => client.assertNotDenied(".ENV")).toThrow(
+        /matches FS_DENY_FILE_PATTERNS/,
+      );
+      expect(() => client.assertNotDenied("Backup.KEY")).toThrow();
+      expect(() => client.assertNotDenied("ID_RSA.pub")).toThrow();
+      expect(client.basenameMatchesDeny("SERVER.Key")).toBe(true);
+    });
+
     it("does not throw on basenames not matching deny", () => {
       const client = makeClient([root]);
       expect(() => client.assertNotDenied("readme.md")).not.toThrow();
