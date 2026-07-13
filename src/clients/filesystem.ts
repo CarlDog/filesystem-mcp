@@ -1078,9 +1078,13 @@ export class FilesystemClient {
  * Minimal glob matcher for basenames. Supports `*` (any chars except
  * separator) and `?` (single char). NOT a full glob — no `**`, no
  * brace expansion, no character classes. Sufficient for deny-patterns.
+ *
+ * Matching is case-insensitive: deny patterns are a security filter,
+ * and `Backup.KEY` / `.ENV` / `ID_RSA` must not slip past `*.key` /
+ * `*.env` / `id_rsa*` on a case-sensitive comparison.
  */
 function globMatch(name: string, pattern: string): boolean {
   const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
   const re = "^" + escaped.replace(/\*/g, ".*").replace(/\?/g, ".") + "$";
-  return new RegExp(re).test(name);
+  return new RegExp(re, "i").test(name);
 }
