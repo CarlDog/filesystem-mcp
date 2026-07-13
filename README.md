@@ -49,6 +49,7 @@ and — when explicitly enabled — fix the differences.
 | `FS_MAX_READ_BYTES` | no | Cap on `fs_read_file` (default 1 MiB; 0 disables) |
 | `FS_MAX_LIST_ENTRIES` | no | Cap on `fs_list_directory` (default 1000) |
 | `MCP_PORT` | no | Set to enable HTTP transport. Unset = stdio. |
+| `MCP_ALLOWED_HOSTS` | no | Comma-separated `host[:port]` allowlist enabling DNS-rebinding protection on the HTTP transport. **Recommended**: set it to the host names/IPs clients actually use, e.g. `192.168.1.50:3006,host.docker.internal:3006`. Unset = protection off (startup warning is logged). |
 | `FS_VOLUME` | yes (compose only) | `host:container[:flags]` bind spec consumed by `docker-compose.yml`. Ignored by `npm run dev`. |
 
 ## Safety model
@@ -81,7 +82,11 @@ at startup rather than crashing the server).
 | stdio | Direct invocation by Claude Desktop / MCP client | `docker run -i --rm ... filesystem-mcp` (no `MCP_PORT`) |
 | Streamable HTTP | Long-lived deploy (Portainer, Compose, k8s) | Set `MCP_PORT=3000` (already set in `docker-compose.yml`) |
 
-> HTTP mode has **no MCP auth**. Bind only to a private network.
+> HTTP mode has **no MCP auth** — the deployment assumes a trusted
+> private network (the container binds `0.0.0.0`, as Docker requires).
+> Do not expose the port beyond your LAN. Set `MCP_ALLOWED_HOSTS` to
+> the host names/IPs your clients actually use to also reject requests
+> whose `Host` header isn't on the list (DNS-rebinding protection).
 
 ## Run with Docker Compose
 

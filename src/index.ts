@@ -47,6 +47,20 @@ function parseDenyPatterns(raw: string | undefined): string[] {
     .filter((s) => s.length > 0);
 }
 
+/**
+ * Comma-separated host[:port] allowlist for DNS-rebinding protection
+ * on the HTTP transport. Empty/unset ⇒ protection off (with a startup
+ * warning) — fail-soft so enabling the knob is opt-in and can't break
+ * an existing LAN deployment on redeploy.
+ */
+function parseAllowedHosts(raw: string | undefined): string[] {
+  if (raw === undefined) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
 function parseIntEnv(
   raw: string | undefined,
   fallback: number,
@@ -165,6 +179,15 @@ if (portStr && (port === null || Number.isNaN(port))) {
 }
 
 if (port) {
+  const allowedHosts = parseAllowedHosts(process.env.MCP_ALLOWED_HOSTS);
+  if (allowedHosts.length === 0) {
+    console.error(
+      "filesystem-mcp: MCP_ALLOWED_HOSTS is unset — DNS-rebinding protection is OFF. " +
+        "Recommended: set it to the host[:port] names clients actually use " +
+        "(e.g. your NAS IP and host.docker.internal).",
+    );
+  }
+
   const httpApp = express();
   httpApp.use(express.json());
 
@@ -187,6 +210,11 @@ if (port) {
           onsessioninitialized: (id) => {
             transports[id] = transport;
           },
+          // Opt-in DNS-rebinding protection: only enforced when the
+          // operator provides an allowlist (see startup warning above).
+          ...(allowedHosts.length > 0
+            ? { enableDnsRebindingProtection: true, allowedHosts }
+            : {}),
         });
         transport.onclose = () => {
           if (transport.sessionId) {

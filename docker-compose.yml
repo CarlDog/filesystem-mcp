@@ -8,6 +8,11 @@ services:
       - "${HOST_PORT:-3006}:3000"
     environment:
       MCP_PORT: "3000"
+      # Recommended: enable DNS-rebinding protection by listing the
+      # host[:port] names clients actually use to reach this server,
+      # e.g. the NAS IP and host.docker.internal. Unset = protection
+      # off (a startup warning is logged).
+      # MCP_ALLOWED_HOSTS: "192.168.1.50:3006,host.docker.internal:3006"
       # FS_ROOTS is optional: when unset, roots are derived from the
       # container-side targets of FS_VOLUME* below (declare each mount
       # once). Set it explicitly only to NARROW the exposed set.
