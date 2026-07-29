@@ -119,6 +119,18 @@ Claude Code (user scope) and Claude Desktop config.
   (no write tools registered, confirming the env-gate works); real
   `fs_list_directory` against `/media` returns the live Synology share contents.
 
+- **Dev-chain eslint 10 + SDK 1.30 audit sweep (2026-07-29).** eslint
+  ^10.8.0, @eslint/js ^10.0.1, eslint-config-prettier ^10.1.8;
+  @modelcontextprotocol/sdk ^1.30.0 with @hono/node-server 2.0.12
+  (GHSA-frvp-7c67-39w9). npm audit 0, was 5 high + 2 moderate.
+  eslint 10 fixes: preserve-caught-error on both assertWithinRoots
+  escape throws (now chain the original realpath error as cause) and
+  no-useless-assignment on assessCopyTree's dead entries=0 init.
+  .gitattributes now forces eol=lf checkouts (kills local CRLF
+  prettier noise; index was already LF). Lockfile via pinned npm
+  10.9.8. Verified: lint, typecheck, tests, format:check. Runtime
+  majors stay deferred per the closed npm-major PR.
+
 ## Next
 
 See [HANDOFF.md](HANDOFF.md) for the prioritized list with per-tool

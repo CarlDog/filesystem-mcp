@@ -231,13 +231,17 @@ export class FilesystemClient {
         const parent = path.dirname(current);
         if (parent === current) {
           // walked to the filesystem root without finding an ancestor
-          throw new Error(`path escapes configured FS_ROOTS: ${inputPath}`);
+          throw new Error(`path escapes configured FS_ROOTS: ${inputPath}`, {
+            cause: err,
+          });
         }
         missing.unshift(path.basename(current));
         try {
           const real = await fs.realpath(parent);
           if (!this.isInRoots(real)) {
-            throw new Error(`path escapes configured FS_ROOTS: ${inputPath}`);
+            throw new Error(`path escapes configured FS_ROOTS: ${inputPath}`, {
+              cause: err,
+            });
           }
           return path.join(real, ...missing);
         } catch (err2) {
@@ -887,7 +891,7 @@ export class FilesystemClient {
     byteCap: number,
     dereference: boolean,
   ): Promise<{ entries: number; bytes: number; truncated: boolean }> {
-    let entries = 0;
+    let entries: number;
     let bytes = 0;
 
     const initialStat = dereference
