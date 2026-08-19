@@ -23,7 +23,7 @@ export function registerWriteTools(
     {
       title: "Filesystem: Move/Rename",
       description:
-        "Move or rename a path. Both `from` and `to` must resolve under FS_ROOTS, and neither basename may match FS_DENY_FILE_PATTERNS. Refuses symlink sources (would silently move the target through the link, leaving a dangling pointer — pass the realpath directly). Refuses destinations that exist as a directory. Refuses destinations that exist as a regular file unless overwrite=true. Atomic via rename on the same device; on EXDEV falls back to copy+delete with cross_device=true in the response (NOT atomic). Honors dry_run.",
+        "Move or rename a path. Both `from` and `to` must resolve under FS_ROOTS, and neither basename may match FS_DENY_FILE_PATTERNS. Refuses symlink sources (would silently move the target through the link, leaving a dangling pointer — pass the realpath directly). Refuses destinations that exist as a directory. Refuses destinations that exist as a regular file unless overwrite=true. When an overwrite would actually happen, also requires confirm_name to match the destination's basename. Atomic via rename on the same device; on EXDEV falls back to copy+delete with cross_device=true in the response (NOT atomic). Honors dry_run.",
       inputSchema: {
         from: z
           .string()
@@ -41,6 +41,12 @@ export function registerWriteTools(
           .describe(
             "Allow replacing an existing regular file at the destination. Never replaces a directory regardless. Default false.",
           ),
+        confirm_name: z
+          .string()
+          .optional()
+          .describe(
+            "Required (must equal the destination's basename) whenever this call would actually overwrite an existing file — i.e. overwrite=true, the destination exists, and dry_run=false. Re-validated against the resolved destination; a mismatch refuses the move. Use dry_run=true first to see the resolved destination and its basename.",
+          ),
         dry_run: z
           .boolean()
           .default(true)
@@ -50,10 +56,11 @@ export function registerWriteTools(
       },
       annotations: ANN_DESTRUCTIVE,
     },
-    logged("fs_move", async ({ from, to, overwrite, dry_run }) =>
+    logged("fs_move", async ({ from, to, overwrite, confirm_name, dry_run }) =>
       asJson(
         await fs.move(from, to, {
           overwrite,
+          confirmName: confirm_name,
           dryRun: dry_run,
         }),
       ),
@@ -65,7 +72,7 @@ export function registerWriteTools(
     {
       title: "Filesystem: Copy",
       description:
-        "Copy a file or directory. Both paths must resolve under FS_ROOTS, and neither basename may match FS_DENY_FILE_PATTERNS. The source tree is walked up-front and the operation is REFUSED if it exceeds the configured per-call limits (FS_MAX_COPY_ENTRIES, FS_MAX_COPY_BYTES) — this MCP is not the right tool for large-scale moves; use rsync or iterate per-subdirectory. Refuses non-recursive copy of a directory. Refuses destinations that exist as a directory. Refuses existing file destinations unless overwrite=true. Symlinks are copied AS symlinks by default (the link itself, not its target); pass dereference=true to follow. Honors dry_run.",
+        "Copy a file or directory. Both paths must resolve under FS_ROOTS, and neither basename may match FS_DENY_FILE_PATTERNS. The source tree is walked up-front and the operation is REFUSED if it exceeds the configured per-call limits (FS_MAX_COPY_ENTRIES, FS_MAX_COPY_BYTES) — this MCP is not the right tool for large-scale moves; use rsync or iterate per-subdirectory. Refuses non-recursive copy of a directory. Refuses destinations that exist as a directory. Refuses existing file destinations unless overwrite=true. When an overwrite would actually happen, also requires confirm_name to match the destination's basename. Symlinks are copied AS symlinks by default (the link itself, not its target); pass dereference=true to follow. Honors dry_run.",
       inputSchema: {
         from: z.string().describe("Absolute source path (must exist)."),
         to: z
@@ -91,6 +98,12 @@ export function registerWriteTools(
           .describe(
             "Allow replacing an existing regular file at the destination. Never replaces a directory regardless. Default false.",
           ),
+        confirm_name: z
+          .string()
+          .optional()
+          .describe(
+            "Required (must equal the destination's basename) whenever this call would actually overwrite an existing file — i.e. overwrite=true, the destination exists, and dry_run=false. Re-validated against the resolved destination; a mismatch refuses the copy. Use dry_run=true first to see the resolved destination and its basename.",
+          ),
         dry_run: z
           .boolean()
           .default(true)
@@ -105,12 +118,21 @@ export function registerWriteTools(
     },
     logged(
       "fs_copy",
-      async ({ from, to, recursive, dereference, overwrite, dry_run }) =>
+      async ({
+        from,
+        to,
+        recursive,
+        dereference,
+        overwrite,
+        confirm_name,
+        dry_run,
+      }) =>
         asJson(
           await fs.copy(from, to, {
             recursive,
             dereference,
             overwrite,
+            confirmName: confirm_name,
             dryRun: dry_run,
           }),
         ),
@@ -122,7 +144,7 @@ export function registerWriteTools(
     {
       title: "Filesystem: Delete",
       description:
-        "Delete a file, directory, or symlink. Path must resolve inside FS_ROOTS. Symlinks are UNLINKED (the link itself, not its target) — even when encountered mid-tree during a recursive delete. Non-empty directories require recursive=true. TWO flags must be set to actually mutate: both dry_run=false AND confirm=true. This is the only write tool with the confirm flag because deletion is irreversible. Honors dry_run.",
+        "Delete a file, directory, or symlink. Path must resolve inside FS_ROOTS. Symlinks are UNLINKED (the link itself, not its target) — even when encountered mid-tree during a recursive delete. Non-empty directories require recursive=true. THREE things must agree to actually mutate: dry_run=false, confirm=true, and confirm_name equal to the resolved target's basename. confirm is slip-defense against a stray call; confirm_name is what actually stops a wrong path from being deleted, since it's re-validated against what was really resolved rather than trusted from the input. Honors dry_run.",
       inputSchema: {
         path: z
           .string()
@@ -137,25 +159,34 @@ export function registerWriteTools(
           .boolean()
           .default(true)
           .describe(
-            "Preview without deleting. Default true. To actually delete, pass dry_run=false AND confirm=true.",
+            "Preview without deleting. Default true. To actually delete, pass dry_run=false, confirm=true, AND confirm_name.",
           ),
         confirm: z
           .boolean()
           .default(false)
           .describe(
-            "Belt-and-suspenders flag REQUIRED alongside dry_run=false to actually mutate. Default false. Two independent flags must agree before any irreversible delete is performed.",
+            "Belt-and-suspenders flag REQUIRED alongside dry_run=false to actually mutate. Default false.",
+          ),
+        confirm_name: z
+          .string()
+          .optional()
+          .describe(
+            "REQUIRED alongside dry_run=false and confirm=true: must equal the basename of the resolved target (re-validated server-side — a mismatch refuses the delete). Use dry_run=true first to see the resolved path and its basename.",
           ),
       },
       annotations: ANN_DESTRUCTIVE,
     },
-    logged("fs_delete", async ({ path: p, recursive, dry_run, confirm }) =>
-      asJson(
-        await fs.delete(p, {
-          recursive,
-          dryRun: dry_run,
-          confirm,
-        }),
-      ),
+    logged(
+      "fs_delete",
+      async ({ path: p, recursive, dry_run, confirm, confirm_name }) =>
+        asJson(
+          await fs.delete(p, {
+            recursive,
+            dryRun: dry_run,
+            confirm,
+            confirmName: confirm_name,
+          }),
+        ),
     ),
   );
 

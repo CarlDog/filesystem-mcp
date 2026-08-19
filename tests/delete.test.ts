@@ -17,7 +17,7 @@ describe("FilesystemClient.delete", () => {
     await rmSandbox(root);
   });
 
-  describe("two-flag mutation gate", () => {
+  describe("mutation gate", () => {
     it("dry_run=true returns the plan without touching the filesystem", async () => {
       await buildFixture(root, { "a.txt": "hello" });
       const client = makeClient([root], { allowWrite: true });
@@ -54,9 +54,38 @@ describe("FilesystemClient.delete", () => {
       const result = await client.delete(target, {
         dryRun: false,
         confirm: true,
+        confirmName: "a.txt",
       });
       expect(result.performed).toBe(true);
       await expect(fs.lstat(target)).rejects.toThrow();
+    });
+
+    it("dry_run=false AND confirm=true WITHOUT confirm_name throws and does not delete", async () => {
+      await buildFixture(root, { "a.txt": "hello" });
+      const client = makeClient([root], { allowWrite: true });
+      const target = path.join(root, "a.txt");
+
+      await expect(
+        client.delete(target, { dryRun: false, confirm: true }),
+      ).rejects.toThrow(/confirm_name matching its basename/);
+
+      await expect(fs.lstat(target)).resolves.toBeTruthy();
+    });
+
+    it("a mismatched confirm_name throws and does not delete", async () => {
+      await buildFixture(root, { "a.txt": "hello" });
+      const client = makeClient([root], { allowWrite: true });
+      const target = path.join(root, "a.txt");
+
+      await expect(
+        client.delete(target, {
+          dryRun: false,
+          confirm: true,
+          confirmName: "wrong-name.txt",
+        }),
+      ).rejects.toThrow(/confirm_name matching its basename/);
+
+      await expect(fs.lstat(target)).resolves.toBeTruthy();
     });
 
     it("confirm=true is harmless on dry_run=true (preview still allowed)", async () => {
@@ -80,6 +109,7 @@ describe("FilesystemClient.delete", () => {
       const result = await client.delete(target, {
         dryRun: false,
         confirm: true,
+        confirmName: "empty",
       });
       expect(result.type).toBe("dir");
       expect(result.paths_to_delete).toBe(1);
@@ -115,6 +145,7 @@ describe("FilesystemClient.delete", () => {
         recursive: true,
         dryRun: false,
         confirm: true,
+        confirmName: "sub",
       });
       expect(real.performed).toBe(true);
       await expect(fs.lstat(target)).rejects.toThrow();

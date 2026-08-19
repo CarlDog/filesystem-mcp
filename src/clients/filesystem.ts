@@ -676,7 +676,11 @@ export class FilesystemClient {
   async move(
     fromInput: string,
     toInput: string,
-    opts: { overwrite?: boolean; dryRun?: boolean } = {},
+    opts: {
+      overwrite?: boolean;
+      dryRun?: boolean;
+      confirmName?: string;
+    } = {},
   ): Promise<MoveResult> {
     if (!this.config.allowWrite) {
       throw new Error("write operations are disabled (FS_ALLOW_WRITE=false)");
@@ -718,6 +722,21 @@ export class FilesystemClient {
     }
 
     const wouldOverwrite = toLstat !== null;
+
+    // A move that overwrites an existing file destroys its prior content —
+    // the same risk shape as fs_delete. `overwrite=true` alone can be set
+    // by an agent without a human ever seeing it, so an actual overwrite
+    // (not dry_run) additionally requires the caller to name the file it's
+    // about to replace, re-validated against the resolved destination.
+    if (wouldOverwrite && !dryRun) {
+      const expected = path.basename(to);
+      if (opts.confirmName !== expected) {
+        throw new Error(
+          `fs_move refuses to overwrite "${to}" without confirm_name matching its basename. ` +
+            `Pass confirm_name="${expected}" to proceed, or set overwrite=false / dry_run=true to preview.`,
+        );
+      }
+    }
 
     // Detect cross-device up-front by comparing the source's device id
     // against the destination's parent. The dry_run result reports this
@@ -798,6 +817,7 @@ export class FilesystemClient {
       dereference?: boolean;
       overwrite?: boolean;
       dryRun?: boolean;
+      confirmName?: string;
     } = {},
   ): Promise<CopyResult> {
     if (!this.config.allowWrite) {
@@ -855,6 +875,19 @@ export class FilesystemClient {
       }
     }
     const wouldOverwrite = toLstat !== null;
+
+    // Same posture as fs_move: an actual overwrite (not dry_run) requires
+    // the caller to name the file it's about to replace, re-validated
+    // against the resolved destination. See move()'s matching comment.
+    if (wouldOverwrite && !dryRun) {
+      const expected = path.basename(to);
+      if (opts.confirmName !== expected) {
+        throw new Error(
+          `fs_copy refuses to overwrite "${to}" without confirm_name matching its basename. ` +
+            `Pass confirm_name="${expected}" to proceed, or set overwrite=false / dry_run=true to preview.`,
+        );
+      }
+    }
 
     // Walk + size assessment. Refuse if it exceeds limits.
     const summary = await this.assessCopyTree(
@@ -1028,7 +1061,12 @@ export class FilesystemClient {
    */
   async delete(
     inputPath: string,
-    opts: { recursive?: boolean; dryRun?: boolean; confirm?: boolean } = {},
+    opts: {
+      recursive?: boolean;
+      dryRun?: boolean;
+      confirm?: boolean;
+      confirmName?: string;
+    } = {},
   ): Promise<DeleteResult> {
     if (!this.config.allowWrite) {
       throw new Error("write operations are disabled (FS_ALLOW_WRITE=false)");
@@ -1070,6 +1108,21 @@ export class FilesystemClient {
       target = await this.assertWithinRoots(inputPath, true);
     }
     this.assertNotDenied(path.basename(target));
+
+    // `confirm=true` alone is slip-defense, not real prevention — an
+    // autonomous agent can set it itself with no human ever seeing the
+    // path. Deletion is irreversible, so an actual delete (not dry_run)
+    // additionally requires the caller to name the target it resolved,
+    // re-validated against what was actually resolved.
+    if (!dryRun) {
+      const expected = path.basename(target);
+      if (opts.confirmName !== expected) {
+        throw new Error(
+          `fs_delete refuses to delete "${target}" without confirm_name matching its basename. ` +
+            `Pass confirm_name="${expected}" alongside confirm=true and dry_run=false to proceed.`,
+        );
+      }
+    }
 
     const targetType: DeleteResult["type"] = targetLstat.isSymbolicLink()
       ? "symlink"

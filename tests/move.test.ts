@@ -81,9 +81,53 @@ describe("FilesystemClient.move", () => {
     const real = await client.move(from, to, {
       overwrite: true,
       dryRun: false,
+      confirmName: "dst.txt",
     });
     expect(real.performed).toBe(true);
     expect(real.would_overwrite).toBe(true);
+    expect(await fs.readFile(to, "utf8")).toBe("src");
+  });
+
+  it("an overwrite WITHOUT confirm_name throws and does not touch either file", async () => {
+    await buildFixture(root, { "src.txt": "src", "dst.txt": "DST" });
+    const client = makeClient([root], { allowWrite: true });
+    const from = path.join(root, "src.txt");
+    const to = path.join(root, "dst.txt");
+
+    await expect(
+      client.move(from, to, { overwrite: true, dryRun: false }),
+    ).rejects.toThrow(/confirm_name matching its basename/);
+
+    expect(await fs.readFile(from, "utf8")).toBe("src");
+    expect(await fs.readFile(to, "utf8")).toBe("DST");
+  });
+
+  it("an overwrite with a mismatched confirm_name throws and does not touch either file", async () => {
+    await buildFixture(root, { "src.txt": "src", "dst.txt": "DST" });
+    const client = makeClient([root], { allowWrite: true });
+    const from = path.join(root, "src.txt");
+    const to = path.join(root, "dst.txt");
+
+    await expect(
+      client.move(from, to, {
+        overwrite: true,
+        dryRun: false,
+        confirmName: "wrong-name.txt",
+      }),
+    ).rejects.toThrow(/confirm_name matching its basename/);
+
+    expect(await fs.readFile(from, "utf8")).toBe("src");
+    expect(await fs.readFile(to, "utf8")).toBe("DST");
+  });
+
+  it("a non-overwriting move does not require confirm_name", async () => {
+    await buildFixture(root, { "src.txt": "src" });
+    const client = makeClient([root], { allowWrite: true });
+    const from = path.join(root, "src.txt");
+    const to = path.join(root, "dst.txt");
+
+    const real = await client.move(from, to, { dryRun: false });
+    expect(real.performed).toBe(true);
     expect(await fs.readFile(to, "utf8")).toBe("src");
   });
 

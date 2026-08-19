@@ -15,8 +15,11 @@ and — when explicitly enabled — fix the differences.
 
 > **All five read tools and four write tools implemented.** Write
 > tools default to `dry_run=true`; `fs_delete` additionally requires
-> `confirm=true`. The deployed stack exposes only the read tools
-> until `FS_ALLOW_WRITE=true` is flipped explicitly.
+> `confirm=true` AND `confirm_name` (the resolved target's basename);
+> `fs_move`/`fs_copy` require `confirm_name` too whenever the call
+> would actually overwrite an existing file. The deployed stack
+> exposes only the read tools until `FS_ALLOW_WRITE=true` is flipped
+> explicitly.
 
 ## Tools
 
@@ -34,9 +37,9 @@ and — when explicitly enabled — fix the differences.
 
 | Tool | Status | Description |
 | --- | --- | --- |
-| `fs_move` | ✅ implemented | Move or rename a path (`dry_run` defaults true) |
-| `fs_copy` | ✅ implemented | Copy a file or directory (`dry_run` defaults true; refuses trees over 10k entries / 500 GiB) |
-| `fs_delete` | ✅ implemented | Delete a path (`dry_run` defaults true; `recursive` opt-in for non-empty dirs; **`confirm: true` REQUIRED alongside `dry_run: false` to actually mutate**) |
+| `fs_move` | ✅ implemented | Move or rename a path (`dry_run` defaults true; **`confirm_name` REQUIRED whenever the call would overwrite an existing file**) |
+| `fs_copy` | ✅ implemented | Copy a file or directory (`dry_run` defaults true; refuses trees over 10k entries / 500 GiB; **`confirm_name` REQUIRED whenever the call would overwrite an existing file**) |
+| `fs_delete` | ✅ implemented | Delete a path (`dry_run` defaults true; `recursive` opt-in for non-empty dirs; **`confirm: true` AND `confirm_name` (the target's basename) REQUIRED alongside `dry_run: false` to actually mutate**) |
 | `fs_mkdir` | ✅ implemented | Create a directory (`dry_run` defaults true; recursive opt-in) |
 
 ## Configuration

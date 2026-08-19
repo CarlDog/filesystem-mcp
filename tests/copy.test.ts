@@ -95,10 +95,35 @@ describe("FilesystemClient.copy", () => {
     const result = await client.copy(
       path.join(root, "src.txt"),
       path.join(root, "dst.txt"),
-      { overwrite: true, dryRun: false },
+      { overwrite: true, dryRun: false, confirmName: "dst.txt" },
     );
     expect(result.would_overwrite).toBe(true);
     expect(await fs.readFile(path.join(root, "dst.txt"), "utf8")).toBe("src");
+  });
+
+  it("an overwrite WITHOUT confirm_name throws and does not touch the destination", async () => {
+    await buildFixture(root, { "src.txt": "src", "dst.txt": "DST" });
+    const client = makeClient([root], { allowWrite: true });
+    await expect(
+      client.copy(path.join(root, "src.txt"), path.join(root, "dst.txt"), {
+        overwrite: true,
+        dryRun: false,
+      }),
+    ).rejects.toThrow(/confirm_name matching its basename/);
+    expect(await fs.readFile(path.join(root, "dst.txt"), "utf8")).toBe("DST");
+  });
+
+  it("an overwrite with a mismatched confirm_name throws and does not touch the destination", async () => {
+    await buildFixture(root, { "src.txt": "src", "dst.txt": "DST" });
+    const client = makeClient([root], { allowWrite: true });
+    await expect(
+      client.copy(path.join(root, "src.txt"), path.join(root, "dst.txt"), {
+        overwrite: true,
+        dryRun: false,
+        confirmName: "wrong-name.txt",
+      }),
+    ).rejects.toThrow(/confirm_name matching its basename/);
+    expect(await fs.readFile(path.join(root, "dst.txt"), "utf8")).toBe("DST");
   });
 
   it("refuses when destination is an existing directory regardless of overwrite", async () => {
