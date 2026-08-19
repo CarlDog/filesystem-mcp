@@ -87,8 +87,8 @@ describe("resolveRoots", () => {
     const file = path.join(root, "a.txt");
     const { resolved, skipped } = await resolveRoots([file]);
     expect(resolved).toEqual([]);
-    expect(skipped[0].root).toBe(file);
-    expect(skipped[0].reason).toMatch(/not a directory/);
+    expect(skipped[0]?.root).toBe(file);
+    expect(skipped[0]?.reason).toMatch(/not a directory/);
   });
 
   it("skips a non-absolute root", async () => {

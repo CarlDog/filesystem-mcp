@@ -1,0 +1,17 @@
+// Typechecks the TESTS too — standard MCP-D01.
+// The build config excludes *.test.ts, and a transpile-only runner like vitest
+// never typechecks them either, so without this file test code is the one part
+// of the repo nothing type-checks.
+// See fleet/lessons/2026-07-24-transpile-only-test-runners-skip-typechecking.md
+{
+  "extends": "./tsconfig.json",
+  // rootDir widened to the repo root (from ./src) because this config also
+  // typechecks tests/ — noEmit means no output paths are computed from it, so
+  // widening it here is safe without touching the build config.
+  "compilerOptions": { "noEmit": true, "rootDir": "." },
+  // filesystem-mcp keeps its original suite in tests/ alongside newer
+  // colocated src/**/*.test.ts files (MCP-T01..T03) — include both so the
+  // whole suite is typechecked, not just the colocated half.
+  "include": ["src/**/*", "tests/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

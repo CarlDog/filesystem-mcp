@@ -43,7 +43,10 @@ export async function buildFixture(
     if (typeof value === "string") {
       await fs.writeFile(full, value);
     } else if ("__symlink" in value) {
-      await fs.symlink(value.__symlink, full);
+      // FixtureSpec's index signature technically permits a property literally
+      // named "__symlink" too, so `in` alone doesn't narrow away the union —
+      // assert the shape we actually construct these fixtures with.
+      await fs.symlink((value as { __symlink: string }).__symlink, full);
     } else {
       await fs.mkdir(full);
       await buildFixture(full, value);
