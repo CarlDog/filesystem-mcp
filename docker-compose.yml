@@ -4,6 +4,7 @@ services:
     pull_policy: always
     container_name: filesystem-mcp
     restart: unless-stopped
+    network_mode: bridge
     ports:
       - "${HOST_PORT:-3006}:3000"
     environment:
