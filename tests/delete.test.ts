@@ -164,6 +164,7 @@ describe("FilesystemClient.delete", () => {
         const result = await client.delete(path.join(root, "link"), {
           dryRun: false,
           confirm: true,
+          confirmName: "link",
         });
         expect(result.type).toBe("symlink");
         expect(result.bytes_to_delete).toBe(0);
@@ -198,6 +199,7 @@ describe("FilesystemClient.delete", () => {
             recursive: true,
             dryRun: false,
             confirm: true,
+            confirmName: "tree",
           });
 
           // Tree gone; outside file still intact.
