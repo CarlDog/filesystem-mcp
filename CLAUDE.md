@@ -6,6 +6,8 @@ can list/inspect/read files on disk, and — when explicitly enabled —
 move/rename/delete them. Path-whitelisted, deny-pattern-aware,
 dry-run-by-default writes.
 
+**Fleet standards:** ts-mcp-server v1.1 — audited 2026-08-19
+
 ## Status
 
 Single source of truth: [STATUS.md](STATUS.md). Do not duplicate status
