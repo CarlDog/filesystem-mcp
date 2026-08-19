@@ -22,14 +22,15 @@ describe("FilesystemClient.findByGlob", () => {
       sub: { "c.txt": "3", deeper: { "d.txt": "4" } },
     });
     const client = makeClient([root]);
-    const results = await client.findByGlob("*.txt");
-    const paths = results.map((r) => r.path).sort();
+    const page = await client.findByGlob("*.txt");
+    const paths = page.items.map((r) => r.path).sort();
     expect(paths).toEqual([
       path.join(root, "a.txt"),
       path.join(root, "sub/c.txt"),
       path.join(root, "sub/deeper/d.txt"),
     ]);
-    expect(results.every((r) => r.type === "file")).toBe(true);
+    expect(page.items.every((r) => r.type === "file")).toBe(true);
+    expect(page.truncated).toBe(false);
   });
 
   it("matches by relative path for patterns with slashes", async () => {
@@ -41,12 +42,12 @@ describe("FilesystemClient.findByGlob", () => {
       "Show B": { Specials: { "ep01.mkv": "x" } },
     });
     const client = makeClient([root]);
-    const results = await client.findByGlob("**/Season *", {
+    const page = await client.findByGlob("**/Season *", {
       startPath: root,
     });
-    const names = results.map((r) => path.basename(r.path)).sort();
+    const names = page.items.map((r) => path.basename(r.path)).sort();
     expect(names).toEqual(["Season 1", "Season 2"]);
-    expect(results.every((r) => r.type === "dir")).toBe(true);
+    expect(page.items.every((r) => r.type === "dir")).toBe(true);
   });
 
   it("filters out deny-pattern matches and does not descend into them", async () => {
@@ -56,30 +57,62 @@ describe("FilesystemClient.findByGlob", () => {
       "bad.key": "secret",
     });
     const client = makeClient([root]);
-    const results = await client.findByGlob("*", { startPath: root });
-    const names = results.map((r) => path.basename(r.path));
+    const page = await client.findByGlob("*", { startPath: root });
+    const names = page.items.map((r) => path.basename(r.path));
     expect(names).not.toContain("a.env");
     expect(names).not.toContain("bad.key");
     expect(names).toContain("ok");
     expect(names).toContain("good.txt");
   });
 
-  it("respects maxResults and clamps to config.maxListEntries", async () => {
+  it("a limit over config.maxListEntries throws instead of clamping", async () => {
     const fixtures: Record<string, string> = {};
     for (let i = 0; i < 20; i++) fixtures[`f${i}.txt`] = "x";
     await buildFixture(root, fixtures);
 
     const client = makeClient([root], { maxListEntries: 5 });
-    // user requests 999, config caps at 5
-    const results = await client.findByGlob("*.txt", { maxResults: 999 });
-    expect(results.length).toBe(5);
+    await expect(client.findByGlob("*.txt", { limit: 999 })).rejects.toThrow(
+      /exceeds the configured maximum/,
+    );
+  });
+
+  it("defaults the page size to maxListEntries and reports truncated=true when more exist", async () => {
+    const fixtures: Record<string, string> = {};
+    for (let i = 0; i < 20; i++) fixtures[`f${i}.txt`] = "x";
+    await buildFixture(root, fixtures);
+
+    const client = makeClient([root], { maxListEntries: 5 });
+    const page = await client.findByGlob("*.txt");
+    expect(page.items.length).toBe(5);
+    expect(page.truncated).toBe(true);
+  });
+
+  it("offset pages through results in stable, sorted-per-directory order", async () => {
+    const fixtures: Record<string, string> = {};
+    for (let i = 0; i < 10; i++) fixtures[`f${i}.txt`] = "x";
+    await buildFixture(root, fixtures);
+
+    const client = makeClient([root], { maxListEntries: 100 });
+    const first = await client.findByGlob("*.txt", { limit: 4 });
+    const second = await client.findByGlob("*.txt", { offset: 4, limit: 4 });
+    const third = await client.findByGlob("*.txt", { offset: 8, limit: 4 });
+
+    expect(first.truncated).toBe(true);
+    expect(second.truncated).toBe(true);
+    expect(third.truncated).toBe(false);
+
+    const all = [...first.items, ...second.items, ...third.items].map((r) =>
+      path.basename(r.path),
+    );
+    expect(new Set(all).size).toBe(10); // no dupes, nothing skipped
   });
 
   it("returns empty for a pattern that matches nothing", async () => {
     await buildFixture(root, { "a.txt": "x" });
     const client = makeClient([root]);
-    const results = await client.findByGlob("*.nonexistent");
-    expect(results).toEqual([]);
+    const page = await client.findByGlob("*.nonexistent");
+    expect(page.items).toEqual([]);
+    expect(page.truncated).toBe(false);
   });
 
   it("walks all configured roots when startPath is omitted", async () => {
@@ -90,8 +123,8 @@ describe("FilesystemClient.findByGlob", () => {
       await buildFixture(root2, { "in-root2.txt": "b" });
 
       const client = makeClient([root, root2]);
-      const results = await client.findByGlob("*.txt");
-      const names = results.map((r) => path.basename(r.path)).sort();
+      const page = await client.findByGlob("*.txt");
+      const names = page.items.map((r) => path.basename(r.path)).sort();
       expect(names).toEqual(["in-root1.txt", "in-root2.txt"]);
     } finally {
       await rmSandbox(root2);
@@ -107,11 +140,13 @@ describe("FilesystemClient.findByGlob", () => {
         link: { __symlink: path.join(root, "real") },
       });
       const client = makeClient([root]);
-      const results = await client.findByGlob("*.txt");
+      const page = await client.findByGlob("*.txt");
       // Should find x.txt at least once (via real). Cycle protection /
       // visited-set dedup means we won't double-emit it from the symlink
       // descent, even though both paths route to the same target.
-      const xMatches = results.filter((r) => path.basename(r.path) === "x.txt");
+      const xMatches = page.items.filter(
+        (r) => path.basename(r.path) === "x.txt",
+      );
       expect(xMatches.length).toBe(1);
     },
   );
@@ -132,8 +167,8 @@ describe("FilesystemClient.findByGlob", () => {
           escape: { __symlink: outside },
         });
         const client = makeClient([root]);
-        const results = await client.findByGlob("*.txt");
-        const names = results.map((r) => path.basename(r.path));
+        const page = await client.findByGlob("*.txt");
+        const names = page.items.map((r) => path.basename(r.path));
         expect(names).toContain("in.txt");
         expect(names).not.toContain("external.txt");
       } finally {
@@ -151,9 +186,11 @@ describe("FilesystemClient.findByGlob", () => {
         loop: { __symlink: root },
       });
       const client = makeClient([root]);
-      const results = await client.findByGlob("a.txt");
+      const page = await client.findByGlob("a.txt");
       // a.txt exists once; loop visit hits cycle protection.
-      const aMatches = results.filter((r) => path.basename(r.path) === "a.txt");
+      const aMatches = page.items.filter(
+        (r) => path.basename(r.path) === "a.txt",
+      );
       expect(aMatches.length).toBe(1);
     },
   );

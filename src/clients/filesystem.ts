@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import picomatch from "picomatch";
+import type { Page } from "../shared/text.js";
 
 /**
  * Bytes sniffed from the start of a file when deciding whether it's
@@ -158,6 +159,23 @@ export interface FindResult {
   type: "file" | "dir" | "symlink" | "other";
 }
 
+/**
+ * findByGlob's result shape deliberately isn't the standard {total, offset,
+ * size, items} page: an exact `total` would require walking the ENTIRE tree
+ * to count every match before returning anything, which is exactly the
+ * transport-timeout risk this MCP guards against elsewhere (see fs_copy's
+ * maxCopyEntries/maxCopyBytes). Instead the walk stops as soon as it has
+ * proof of whether more matches exist beyond the requested page —
+ * `truncated: true` means "there is at least one more match past this
+ * page," not a precise remaining count.
+ */
+export interface FindPage {
+  offset: number;
+  size: number;
+  items: FindResult[];
+  truncated: boolean;
+}
+
 export interface ReadFileResult {
   /** Realpath-resolved canonical path of the file that was read. */
   path: string;
@@ -282,18 +300,33 @@ export class FilesystemClient {
 
   async listDirectory(
     inputPath: string,
-    opts: { maxEntries?: number } = {},
-  ): Promise<DirEntry[]> {
+    opts: { offset?: number; limit?: number } = {},
+  ): Promise<Page<DirEntry>> {
     const real = await this.assertWithinRoots(inputPath);
-    const cap = Math.min(
-      opts.maxEntries ?? this.config.maxListEntries,
-      this.config.maxListEntries,
+    const offset = Math.max(0, opts.offset ?? 0);
+    const limit = opts.limit ?? this.config.maxListEntries;
+    if (limit > this.config.maxListEntries) {
+      throw new Error(
+        `limit ${limit} exceeds the configured maximum of ${this.config.maxListEntries} ` +
+          `(FS_MAX_LIST_ENTRIES). Request a smaller page and use offset to continue.`,
+      );
+    }
+    if (limit < 1) throw new Error(`limit must be at least 1, got ${limit}.`);
+
+    // A single readdir() is cheap regardless of directory size — sorting and
+    // slicing the (already in-memory) dirent list costs nothing extra, so
+    // full pagination here has no walk-cost tradeoff (contrast findByGlob).
+    const dirents = (await fs.readdir(real, { withFileTypes: true })).filter(
+      (ent) => !this.basenameMatchesDeny(ent.name),
     );
-    const dirents = await fs.readdir(real, { withFileTypes: true });
-    const entries: DirEntry[] = [];
-    for (const ent of dirents) {
-      if (entries.length >= cap) break;
-      if (this.basenameMatchesDeny(ent.name)) continue;
+    // Stable, unique tiebreak: names are unique within one directory listing.
+    dirents.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+
+    const total = dirents.length;
+    const page = dirents.slice(offset, offset + limit);
+
+    const items: DirEntry[] = [];
+    for (const ent of page) {
       const full = path.join(real, ent.name);
       let size: number | undefined;
       let mtime: string | undefined;
@@ -304,7 +337,7 @@ export class FilesystemClient {
       } catch {
         // entry vanished between readdir and lstat; skip stat fields
       }
-      entries.push({
+      items.push({
         name: ent.name,
         type: ent.isSymbolicLink()
           ? "symlink"
@@ -317,7 +350,7 @@ export class FilesystemClient {
         mtime,
       });
     }
-    return entries;
+    return { total, offset, size: items.length, items };
   }
 
   async stat(inputPath: string): Promise<FileStat> {
@@ -455,12 +488,21 @@ export class FilesystemClient {
    */
   async findByGlob(
     pattern: string,
-    opts: { startPath?: string; maxResults?: number } = {},
-  ): Promise<FindResult[]> {
-    const cap = Math.min(
-      opts.maxResults ?? this.config.maxListEntries,
-      this.config.maxListEntries,
-    );
+    opts: { startPath?: string; offset?: number; limit?: number } = {},
+  ): Promise<FindPage> {
+    const offset = Math.max(0, opts.offset ?? 0);
+    const limit = opts.limit ?? this.config.maxListEntries;
+    if (limit > this.config.maxListEntries) {
+      throw new Error(
+        `limit ${limit} exceeds the configured maximum of ${this.config.maxListEntries} ` +
+          `(FS_MAX_LIST_ENTRIES). Request a smaller page and use offset to continue.`,
+      );
+    }
+    if (limit < 1) throw new Error(`limit must be at least 1, got ${limit}.`);
+
+    // Walk until we have proof of whether a match past this page exists —
+    // one more than offset+limit — rather than the whole tree. See FindPage.
+    const walkCap = offset + limit + 1;
     const matcher = picomatch(pattern, { matchBase: true });
 
     const walkRoots: string[] = [];
@@ -470,15 +512,21 @@ export class FilesystemClient {
       walkRoots.push(...this.config.roots);
     }
 
+    // Stable order across the walk: sort each directory's entries by name
+    // before matching/descending (bfsWalk does this internally now), so the
+    // same offset/limit window is reproducible call to call on an unchanged
+    // tree.
     const results: FindResult[] = [];
     const visited = new Set<string>();
 
     for (const root of walkRoots) {
-      if (results.length >= cap) break;
-      await this.bfsWalk(root, matcher, results, cap, visited);
+      if (results.length >= walkCap) break;
+      await this.bfsWalk(root, matcher, results, walkCap, visited);
     }
 
-    return results;
+    const truncated = results.length > offset + limit;
+    const items = results.slice(offset, offset + limit);
+    return { offset, size: items.length, items, truncated };
   }
 
   private async bfsWalk(
@@ -512,6 +560,11 @@ export class FilesystemClient {
         // Permission denied, vanished mid-walk, etc. Skip silently.
         continue;
       }
+      // Sort each directory's entries by name before matching/descending —
+      // readdir's OS-native order isn't guaranteed lexicographic or stable
+      // across calls, and offset/limit pagination needs a reproducible walk
+      // order on an unchanged tree (a unique tiebreak within one directory).
+      dirents.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
       for (const ent of dirents) {
         if (results.length >= cap) break;

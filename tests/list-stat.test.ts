@@ -22,16 +22,19 @@ describe("FilesystemClient list/stat", () => {
         sub: { "nested.txt": "x" },
       });
       const client = makeClient([root]);
-      const entries = await client.listDirectory(root);
-      const names = entries.map((e) => e.name).sort();
+      const page = await client.listDirectory(root);
+      const names = page.items.map((e) => e.name).sort();
       expect(names).toEqual(["a.txt", "sub"]);
+      expect(page.total).toBe(2);
+      expect(page.offset).toBe(0);
+      expect(page.size).toBe(2);
 
-      const a = entries.find((e) => e.name === "a.txt")!;
+      const a = page.items.find((e) => e.name === "a.txt")!;
       expect(a.type).toBe("file");
       expect(a.size).toBe(5);
       expect(a.mtime).toBeTruthy();
 
-      const sub = entries.find((e) => e.name === "sub")!;
+      const sub = page.items.find((e) => e.name === "sub")!;
       expect(sub.type).toBe("dir");
     });
 
@@ -42,30 +45,53 @@ describe("FilesystemClient list/stat", () => {
         id_rsa: "key",
       });
       const client = makeClient([root]);
-      const names = (await client.listDirectory(root)).map((e) => e.name);
+      const page = await client.listDirectory(root);
+      const names = page.items.map((e) => e.name);
       expect(names).toContain("a.txt");
       expect(names).not.toContain(".env");
       expect(names).not.toContain("id_rsa");
+      // total is post-filter — the denied entries don't count either.
+      expect(page.total).toBe(1);
     });
 
-    it("respects the cap (clamped to maxListEntries)", async () => {
+    it("defaults the page size to maxListEntries and reports the true total", async () => {
       const fixtures: Record<string, string> = {};
       for (let i = 0; i < 10; i++) fixtures[`f${i}.txt`] = "x";
       await buildFixture(root, fixtures);
 
       const client = makeClient([root], { maxListEntries: 5 });
-      const entries = await client.listDirectory(root);
-      expect(entries.length).toBe(5);
+      const page = await client.listDirectory(root);
+      expect(page.items.length).toBe(5);
+      expect(page.total).toBe(10);
+      expect(page.size).toBe(5);
     });
 
-    it("user-provided maxEntries cannot exceed config.maxListEntries", async () => {
+    it("offset pages through results in stable, sorted order", async () => {
+      const fixtures: Record<string, string> = {};
+      for (let i = 0; i < 10; i++) fixtures[`f${i}.txt`] = "x";
+      await buildFixture(root, fixtures);
+
+      const client = makeClient([root], { maxListEntries: 100 });
+      const first = await client.listDirectory(root, { limit: 4 });
+      const second = await client.listDirectory(root, { offset: 4, limit: 4 });
+      const third = await client.listDirectory(root, { offset: 8, limit: 4 });
+
+      const all = [...first.items, ...second.items, ...third.items].map(
+        (e) => e.name,
+      );
+      expect(new Set(all).size).toBe(10); // no dupes, nothing skipped
+      expect(all).toEqual([...all].sort()); // globally sorted across pages
+    });
+
+    it("a limit over config.maxListEntries throws instead of clamping", async () => {
       const fixtures: Record<string, string> = {};
       for (let i = 0; i < 10; i++) fixtures[`f${i}.txt`] = "x";
       await buildFixture(root, fixtures);
 
       const client = makeClient([root], { maxListEntries: 3 });
-      const entries = await client.listDirectory(root, { maxEntries: 999 });
-      expect(entries.length).toBe(3);
+      await expect(client.listDirectory(root, { limit: 999 })).rejects.toThrow(
+        /exceeds the configured maximum/,
+      );
     });
   });
 

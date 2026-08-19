@@ -32,26 +32,34 @@ export function registerReadTools(
     {
       title: "Filesystem: List Directory",
       description:
-        "List entries in a directory. Returns name, type (file/dir/symlink/other), size (files only), and mtime. Entries matching FS_DENY_FILE_PATTERNS (e.g. *.env, *.key) are filtered out silently. Capped at FS_MAX_LIST_ENTRIES; pass max_entries to request fewer.",
+        "List entries in a directory, paginated. Returns {total, offset, size, items}: total is the full (post-filter) entry count, items is this page, sorted by name for a stable/reproducible order. Each item has name, type (file/dir/symlink/other), size (files only), and mtime. Entries matching FS_DENY_FILE_PATTERNS (e.g. *.env, *.key) are filtered out before total is computed. limit defaults to and is capped by FS_MAX_LIST_ENTRIES — requesting a larger limit THROWS rather than silently truncating; page further with offset instead.",
       inputSchema: {
         path: z
           .string()
           .describe(
             "Absolute path to a directory inside one of the configured FS_ROOTS",
           ),
-        max_entries: z
+        offset: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe(
+            "Number of (post-filter, sorted) entries to skip. Default 0.",
+          ),
+        limit: z
           .number()
           .int()
           .positive()
           .optional()
           .describe(
-            "Cap on entries returned (also subject to FS_MAX_LIST_ENTRIES)",
+            "Max entries to return. Defaults to and is capped by FS_MAX_LIST_ENTRIES — a larger value throws instead of clamping.",
           ),
       },
       annotations: ANN_READ,
     },
-    logged("fs_list_directory", async ({ path: p, max_entries }) =>
-      asJson(await fs.listDirectory(p, { maxEntries: max_entries })),
+    logged("fs_list_directory", async ({ path: p, offset, limit }) =>
+      asJson(await fs.listDirectory(p, { offset, limit })),
     ),
   );
 
@@ -117,7 +125,7 @@ export function registerReadTools(
     {
       title: "Filesystem: Find by Glob",
       description:
-        "Find paths matching a glob pattern (picomatch syntax — supports **, *, ?, [...], {a,b}). Patterns without a slash match by basename (so '*.mkv' works); patterns with slashes match against the walk-root-relative path. BFS walk with cycle protection. Symlinks are followed if their target lands inside a configured FS_ROOT, skipped otherwise. Honors FS_DENY_FILE_PATTERNS (no descent, no emit). Capped at max_results (also clamped by FS_MAX_LIST_ENTRIES). When `path` is omitted, walks every configured root.",
+        "Find paths matching a glob pattern (picomatch syntax — supports **, *, ?, [...], {a,b}). Patterns without a slash match by basename (so '*.mkv' works); patterns with slashes match against the walk-root-relative path. BFS walk with cycle protection, entries visited in name-sorted order per directory. Symlinks are followed if their target lands inside a configured FS_ROOT, skipped otherwise. Honors FS_DENY_FILE_PATTERNS (no descent, no emit). Returns {offset, size, items, truncated} — NOT an exact total: computing one would require walking the entire tree, which this MCP avoids for the same transport-timeout reasons fs_copy refuses huge trees. truncated=true means at least one more match exists past this page; page further with offset. limit defaults to and is capped by FS_MAX_LIST_ENTRIES — a larger value throws rather than silently truncating. When `path` is omitted, walks every configured root.",
       inputSchema: {
         pattern: z
           .string()
@@ -131,22 +139,29 @@ export function registerReadTools(
           .describe(
             "Starting directory (absolute, inside FS_ROOTS). Defaults to walking every configured root.",
           ),
-        max_results: z
+        offset: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe("Number of matches to skip. Default 0."),
+        limit: z
           .number()
           .int()
           .positive()
           .optional()
           .describe(
-            "Cap on matches returned (also clamped by FS_MAX_LIST_ENTRIES).",
+            "Max matches to return. Defaults to and is capped by FS_MAX_LIST_ENTRIES — a larger value throws instead of clamping.",
           ),
       },
       annotations: ANN_READ,
     },
-    logged("fs_find_by_glob", async ({ pattern, path: p, max_results }) =>
+    logged("fs_find_by_glob", async ({ pattern, path: p, offset, limit }) =>
       asJson(
         await fs.findByGlob(pattern, {
           startPath: p,
-          maxResults: max_results,
+          offset,
+          limit,
         }),
       ),
     ),
