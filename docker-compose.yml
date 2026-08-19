@@ -11,9 +11,17 @@ services:
       MCP_PORT: "3000"
       # Recommended: enable DNS-rebinding protection by listing the
       # host[:port] names clients actually use to reach this server,
-      # e.g. the NAS IP and host.docker.internal. Unset = protection
-      # off (a startup warning is logged).
-      # MCP_ALLOWED_HOSTS: "192.168.1.50:3006,host.docker.internal:3006"
+      # e.g. the NAS IP and host.docker.internal. Host headers are
+      # matched exactly (case-sensitive, port required) — no
+      # normalization. Unset = protection off (a startup warning is
+      # logged). Set the real value in Portainer's stack env vars, e.g.
+      # "192.168.1.50:3006,host.docker.internal:3006".
+      MCP_ALLOWED_HOSTS: "${MCP_ALLOWED_HOSTS:-}"
+      # Recommended: require a bearer token on the HTTP endpoint,
+      # especially with FS_ALLOW_WRITE=true. Set the real value in
+      # Portainer's stack env vars, never here. Unset = no auth check
+      # (a startup warning is logged).
+      MCP_AUTH_TOKEN: "${MCP_AUTH_TOKEN:-}"
       # FS_ROOTS is optional: when unset, roots are derived from the
       # container-side targets of FS_VOLUME* below (declare each mount
       # once). Set it explicitly only to NARROW the exposed set.

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash, timingSafeEqual } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -59,6 +59,17 @@ function parseAllowedHosts(raw: string | undefined): string[] {
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+/**
+ * Constant-time bearer-token comparison. Hashing both sides first makes
+ * them fixed-length, so timingSafeEqual can't throw on a length mismatch
+ * — and length itself stops being a timing oracle.
+ */
+function tokenMatches(provided: string, expected: string): boolean {
+  const a = createHash("sha256").update(provided).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b);
 }
 
 function parseIntEnv(
@@ -184,7 +195,20 @@ if (port) {
     console.error(
       "filesystem-mcp: MCP_ALLOWED_HOSTS is unset — DNS-rebinding protection is OFF. " +
         "Recommended: set it to the host[:port] names clients actually use " +
-        "(e.g. your NAS IP and host.docker.internal).",
+        "(e.g. your NAS IP and host.docker.internal). Host headers are matched " +
+        "exactly (case-sensitive, port required) — no normalization.",
+    );
+  }
+
+  // Bearer-auth gate on the write-capable HTTP endpoint. Unset ⇒ no auth
+  // check (fail-soft, matching the allowedHosts posture above) — a hard
+  // refuse-to-start here would crash-loop under restart: unless-stopped
+  // on a single missing var.
+  const authToken = process.env.MCP_AUTH_TOKEN || undefined;
+  if (!authToken) {
+    console.error(
+      "filesystem-mcp: MCP_AUTH_TOKEN is unset — the HTTP endpoint has no " +
+        "bearer-auth check. Recommended: set it, especially with FS_ALLOW_WRITE=true.",
     );
   }
 
@@ -194,6 +218,15 @@ if (port) {
   const transports: Record<string, StreamableHTTPServerTransport> = {};
 
   httpApp.all("/mcp", async (req: Request, res: Response) => {
+    if (authToken) {
+      const header = req.headers.authorization ?? "";
+      const provided = header.startsWith("Bearer ") ? header.slice(7) : "";
+      if (!provided || !tokenMatches(provided, authToken)) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+    }
+
     try {
       const sessionId = req.headers["mcp-session-id"] as string | undefined;
       let transport: StreamableHTTPServerTransport;

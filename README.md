@@ -49,7 +49,8 @@ and — when explicitly enabled — fix the differences.
 | `FS_MAX_READ_BYTES` | no | Cap on `fs_read_file` (default 1 MiB; 0 disables) |
 | `FS_MAX_LIST_ENTRIES` | no | Cap on `fs_list_directory` (default 1000) |
 | `MCP_PORT` | no | Set to enable HTTP transport. Unset = stdio. |
-| `MCP_ALLOWED_HOSTS` | no | Comma-separated `host[:port]` allowlist enabling DNS-rebinding protection on the HTTP transport. **Recommended**: set it to the host names/IPs clients actually use, e.g. `192.168.1.50:3006,host.docker.internal:3006`. Unset = protection off (startup warning is logged). |
+| `MCP_ALLOWED_HOSTS` | no | Comma-separated `host:port` allowlist enabling DNS-rebinding protection on the HTTP transport. Matched exactly against the request's `Host` header — case-sensitive, port required, no normalization. **Recommended**: set it to the host:port clients actually use, e.g. `192.168.1.50:3006,host.docker.internal:3006`. Unset = protection off (startup warning is logged). |
+| `MCP_AUTH_TOKEN` | no | Bearer token required on every `/mcp` request (`Authorization: Bearer <token>`), compared with a constant-time check. **Recommended**, especially with `FS_ALLOW_WRITE=true`. Unset = no auth check (startup warning is logged). `/health` is never gated. |
 | `FS_VOLUME` | yes (compose only) | `host:container[:flags]` bind spec consumed by `docker-compose.yml`. Ignored by `npm run dev`. |
 
 ## Safety model
@@ -82,11 +83,12 @@ at startup rather than crashing the server).
 | stdio | Direct invocation by Claude Desktop / MCP client | `docker run -i --rm ... filesystem-mcp` (no `MCP_PORT`) |
 | Streamable HTTP | Long-lived deploy (Portainer, Compose, k8s) | Set `MCP_PORT=3000` (already set in `docker-compose.yml`) |
 
-> HTTP mode has **no MCP auth** — the deployment assumes a trusted
-> private network (the container binds `0.0.0.0`, as Docker requires).
-> Do not expose the port beyond your LAN. Set `MCP_ALLOWED_HOSTS` to
-> the host names/IPs your clients actually use to also reject requests
-> whose `Host` header isn't on the list (DNS-rebinding protection).
+> HTTP mode binds `0.0.0.0` (as Docker requires) and has no auth unless
+> you set `MCP_AUTH_TOKEN`. Do not expose the port beyond your LAN.
+> Set both `MCP_AUTH_TOKEN` (bearer auth) and `MCP_ALLOWED_HOSTS` (rejects
+> requests whose `Host` header isn't on the list — DNS-rebinding
+> protection) — especially with `FS_ALLOW_WRITE=true`, this is the only
+> thing standing between "trusted LAN" and an open write endpoint.
 
 ## Run with Docker Compose
 
