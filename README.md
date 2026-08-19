@@ -52,7 +52,8 @@ and — when explicitly enabled — fix the differences.
 | `FS_MAX_READ_BYTES` | no | Cap on `fs_read_file` (default 1 MiB; 0 disables) |
 | `FS_MAX_LIST_ENTRIES` | no | Cap on `fs_list_directory` (default 1000) |
 | `MCP_PORT` | no | Set to enable HTTP transport. Unset = stdio. |
-| `MCP_ALLOWED_HOSTS` | no | Comma-separated `host:port` allowlist enabling DNS-rebinding protection on the HTTP transport. Matched exactly against the request's `Host` header — case-sensitive, port required, no normalization. **Recommended**: set it to the host:port clients actually use, e.g. `192.168.1.50:3006,host.docker.internal:3006`. Unset = protection off (startup warning is logged). |
+| `MCP_BIND_HOST` | no | Listen address for HTTP transport. Default `0.0.0.0` in `docker-compose.yml` (required for the published port to reach the container); the canonical transport itself defaults to loopback-only, which is correct for a bare process but not a container. |
+| `MCP_ALLOWED_HOSTS` | no | Comma-separated bare-hostname allowlist enabling DNS-rebinding protection on the HTTP transport. Matched against the request's `Host` header with the port stripped and case-insensitively. **Recommended**: set it to the hostnames clients actually use, e.g. `192.168.1.50,host.docker.internal` — no port. Unset = protection off (startup warning is logged). |
 | `MCP_AUTH_TOKEN` | no | Bearer token required on every `/mcp` request (`Authorization: Bearer <token>`), compared with a constant-time check. **Recommended**, especially with `FS_ALLOW_WRITE=true`. Unset = no auth check (startup warning is logged). `/health` is never gated. |
 | `FS_VOLUME` | yes (compose only) | `host:container[:flags]` bind spec consumed by `docker-compose.yml`. Ignored by `npm run dev`. |
 

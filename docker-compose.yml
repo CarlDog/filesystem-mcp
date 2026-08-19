@@ -9,13 +9,22 @@ services:
       - "${HOST_PORT:-3006}:3000"
     environment:
       MCP_PORT: "3000"
+      # Wiring, not configuration (docker-deployments.md #10): the
+      # container-side listen address must match the port mapping above
+      # for the published port to work at all, so this is baked in
+      # rather than left for Portainer to set. The canonical transport
+      # (src/shared/http-transport.ts) defaults to loopback-only when
+      # this is unset — correct for a bare process, wrong inside a
+      # container, where 0.0.0.0 is what makes the port mapping reach
+      # anything.
+      MCP_BIND_HOST: "${MCP_BIND_HOST:-0.0.0.0}"
       # Recommended: enable DNS-rebinding protection by listing the
-      # host[:port] names clients actually use to reach this server,
-      # e.g. the NAS IP and host.docker.internal. Host headers are
-      # matched exactly (case-sensitive, port required) — no
-      # normalization. Unset = protection off (a startup warning is
-      # logged). Set the real value in Portainer's stack env vars, e.g.
-      # "192.168.1.50:3006,host.docker.internal:3006".
+      # bare hostnames clients actually use to reach this server, e.g.
+      # the NAS hostname and host.docker.internal — NO port. Host
+      # headers are matched case-insensitively with the port stripped
+      # (src/shared/http-transport.ts's hostAllowed()). Unset = protection
+      # off (a startup warning is logged). Set the real value in
+      # Portainer's stack env vars, e.g. "your-nas,host.docker.internal".
       MCP_ALLOWED_HOSTS: "${MCP_ALLOWED_HOSTS:-}"
       # Recommended: require a bearer token on the HTTP endpoint,
       # especially with FS_ALLOW_WRITE=true. Set the real value in

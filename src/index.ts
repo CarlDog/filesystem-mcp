@@ -1,9 +1,6 @@
 #!/usr/bin/env node
-import { randomUUID, createHash, timingSafeEqual } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import express, { type Request, type Response } from "express";
 import {
   FilesystemClient,
@@ -11,6 +8,10 @@ import {
 } from "./clients/filesystem.js";
 import { parseRoots, deriveRootsFromVolumes, resolveRoots } from "./config.js";
 import { registerFilesystemTools } from "./tools/index.js";
+import { mountMcpHttp } from "./shared/http-transport.js";
+import { loadBaseConfig } from "./shared/config.js";
+import { logger, setLogLevel, type LogLevel } from "./shared/log.js";
+import { SERVER_VERSION } from "./shared/version.js";
 
 const DEFAULT_DENY_PATTERNS = [
   "*.env",
@@ -44,31 +45,6 @@ function parseDenyPatterns(raw: string | undefined): string[] {
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-}
-
-/**
- * Comma-separated host[:port] allowlist for DNS-rebinding protection
- * on the HTTP transport. Empty/unset ⇒ protection off (with a startup
- * warning) — fail-soft so enabling the knob is opt-in and can't break
- * an existing LAN deployment on redeploy.
- */
-function parseAllowedHosts(raw: string | undefined): string[] {
-  if (raw === undefined) return [];
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-/**
- * Constant-time bearer-token comparison. Hashing both sides first makes
- * them fixed-length, so timingSafeEqual can't throw on a length mismatch
- * — and length itself stops being a timing oracle.
- */
-function tokenMatches(provided: string, expected: string): boolean {
-  const a = createHash("sha256").update(provided).digest();
-  const b = createHash("sha256").update(expected).digest();
-  return timingSafeEqual(a, b);
 }
 
 function parseIntEnv(
@@ -187,7 +163,7 @@ function createServer(): McpServer {
   const server = new McpServer(
     {
       name: "filesystem-mcp",
-      version: "0.1.0",
+      version: SERVER_VERSION,
     },
     {
       instructions: INSTRUCTIONS,
@@ -197,120 +173,83 @@ function createServer(): McpServer {
   return server;
 }
 
-const portStr = process.env.MCP_PORT;
-let port = portStr ? Number.parseInt(portStr, 10) : null;
-if (portStr && (port === null || Number.isNaN(port))) {
-  // Fail soft: don't crash-loop on a typo'd port. Fall back to stdio
-  // (the MCP_PORT-unset behavior) and say so loudly.
+// loadBaseConfig() throws on a malformed value for a var it treats as a
+// safety control (e.g. MCP_ALLOWED_HOSTS set-but-empty) or an unparseable
+// MCP_PORT. Under restart: unless-stopped a bare throw here would surface
+// as an opaque unhandled-rejection stack instead of a clear one-line
+// reason — catch it and exit deliberately.
+let baseConfig;
+try {
+  baseConfig = loadBaseConfig();
+} catch (err) {
   console.error(
-    `filesystem-mcp: invalid MCP_PORT: "${portStr}" — falling back to stdio transport`,
+    `filesystem-mcp: invalid HTTP transport config: ${err instanceof Error ? err.message : String(err)}`,
   );
-  port = null;
+  process.exit(1);
 }
 
-if (port) {
-  const allowedHosts = parseAllowedHosts(process.env.MCP_ALLOWED_HOSTS);
-  if (allowedHosts.length === 0) {
-    console.error(
-      "filesystem-mcp: MCP_ALLOWED_HOSTS is unset — DNS-rebinding protection is OFF. " +
-        "Recommended: set it to the host[:port] names clients actually use " +
-        "(e.g. your NAS IP and host.docker.internal). Host headers are matched " +
-        "exactly (case-sensitive, port required) — no normalization.",
+setLogLevel(baseConfig.logLevel as LogLevel);
+const log = logger("main");
+
+if (baseConfig.port === undefined) {
+  const server = createServer();
+  await server.connect(new StdioServerTransport());
+  log.info("filesystem-mcp ready on stdio", { version: SERVER_VERSION });
+} else {
+  if (!baseConfig.allowedHosts || baseConfig.allowedHosts.length === 0) {
+    log.warn(
+      "MCP_ALLOWED_HOSTS is unset — DNS-rebinding protection is OFF. " +
+        "Recommended: set it to the bare hostnames clients use to reach " +
+        "this server (e.g. your NAS hostname and host.docker.internal) — " +
+        "no port. Host headers are matched case-insensitively with the " +
+        "port stripped.",
     );
   }
-
-  // Bearer-auth gate on the write-capable HTTP endpoint. Unset ⇒ no auth
-  // check (fail-soft, matching the allowedHosts posture above) — a hard
-  // refuse-to-start here would crash-loop under restart: unless-stopped
-  // on a single missing var.
-  const authToken = process.env.MCP_AUTH_TOKEN || undefined;
-  if (!authToken) {
-    console.error(
-      "filesystem-mcp: MCP_AUTH_TOKEN is unset — the HTTP endpoint has no " +
-        "bearer-auth check. Recommended: set it, especially with FS_ALLOW_WRITE=true.",
+  if (!baseConfig.authToken) {
+    log.warn(
+      "MCP_AUTH_TOKEN is unset — the HTTP endpoint has no bearer-auth " +
+        "check. Recommended: set it, especially with FS_ALLOW_WRITE=true.",
     );
   }
 
   const httpApp = express();
   httpApp.use(express.json());
 
-  const transports: Record<string, StreamableHTTPServerTransport> = {};
-
-  httpApp.all("/mcp", async (req: Request, res: Response) => {
-    if (authToken) {
-      const header = req.headers.authorization ?? "";
-      const provided = header.startsWith("Bearer ") ? header.slice(7) : "";
-      if (!provided || !tokenMatches(provided, authToken)) {
-        res.status(401).json({ error: "Unauthorized" });
-        return;
-      }
-    }
-
-    try {
-      const sessionId = req.headers["mcp-session-id"] as string | undefined;
-      let transport: StreamableHTTPServerTransport;
-
-      if (sessionId && transports[sessionId]) {
-        transport = transports[sessionId];
-      } else if (
-        !sessionId &&
-        req.method === "POST" &&
-        isInitializeRequest(req.body)
-      ) {
-        transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => randomUUID(),
-          onsessioninitialized: (id) => {
-            transports[id] = transport;
-          },
-          // Opt-in DNS-rebinding protection: only enforced when the
-          // operator provides an allowlist (see startup warning above).
-          ...(allowedHosts.length > 0
-            ? { enableDnsRebindingProtection: true, allowedHosts }
-            : {}),
-        });
-        transport.onclose = () => {
-          if (transport.sessionId) {
-            delete transports[transport.sessionId];
-          }
-        };
-        const server = createServer();
-        await server.connect(transport);
-      } else {
-        res.status(400).json({
-          jsonrpc: "2.0",
-          error: {
-            code: -32000,
-            message:
-              "Bad Request: missing or unknown session, or non-initialize POST",
-          },
-          id: null,
-        });
-        return;
-      }
-
-      await transport.handleRequest(req, res, req.body);
-    } catch (err) {
-      console.error("MCP request error:", err);
-      if (!res.headersSent) {
-        res.status(500).json({ error: "Internal server error" });
-      }
-    }
-  });
-
   httpApp.get("/health", (_req: Request, res: Response) => {
     res.json({
       status: "ok",
       transport: "http",
-      port,
+      port: baseConfig.port,
       roots: config.roots.length,
       allow_write: config.allowWrite,
     });
   });
 
-  httpApp.listen(port, () => {
-    console.error(`filesystem-mcp HTTP transport listening on :${port}`);
+  const mcp = mountMcpHttp(httpApp, "/mcp", {
+    createServer,
+    authToken: baseConfig.authToken,
+    allowedHosts: baseConfig.allowedHosts,
+    sessionIdleMs: baseConfig.sessionIdleMs,
   });
-} else {
-  const server = createServer();
-  await server.connect(new StdioServerTransport());
+
+  const httpServer = httpApp.listen(
+    baseConfig.port,
+    baseConfig.bindHost,
+    () => {
+      log.info("filesystem-mcp ready on http", {
+        version: SERVER_VERSION,
+        bind: `${baseConfig.bindHost}:${baseConfig.port}`,
+        auth: baseConfig.authToken ? "bearer" : "none",
+        allowedHosts: baseConfig.allowedHosts?.join(",") ?? "any",
+      });
+    },
+  );
+
+  const shutdown = async (signal: string): Promise<void> => {
+    log.info("shutting down", { signal });
+    await mcp.dispose();
+    httpServer.close(() => process.exit(0));
+  };
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("SIGINT", () => void shutdown("SIGINT"));
 }
