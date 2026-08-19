@@ -40,7 +40,6 @@ Composition: this MCP is most useful paired with a domain MCP that knows what fi
 
 function parseDenyPatterns(raw: string | undefined): string[] {
   if (raw === undefined) return DEFAULT_DENY_PATTERNS;
-  if (raw.trim().length === 0) return [];
   return raw
     .split(",")
     .map((s) => s.trim())
@@ -133,9 +132,29 @@ async function buildConfig(): Promise<FilesystemConfig> {
     process.exit(1);
   }
 
+  // FS_DENY_FILE_PATTERNS backs a safety control: an empty list means NO
+  // filenames are excluded, i.e. the sensitive-file filter is fully off.
+  // An unset var falls back to the default (safe); an explicitly-set var
+  // that parses to nothing (e.g. "") must fail loudly rather than
+  // silently disabling the filter — same posture as the empty-roots
+  // check above.
+  const denyPatterns = parseDenyPatterns(process.env.FS_DENY_FILE_PATTERNS);
+  if (
+    process.env.FS_DENY_FILE_PATTERNS !== undefined &&
+    denyPatterns.length === 0
+  ) {
+    console.error(
+      "filesystem-mcp: FS_DENY_FILE_PATTERNS is set but contains no usable " +
+        "entries. Leave it unset to use the default " +
+        `(${DEFAULT_DENY_PATTERNS.join(", ")}); refusing to start with the ` +
+        "sensitive-file filter silently disabled.",
+    );
+    process.exit(1);
+  }
+
   return {
     roots: resolvedRoots,
-    denyPatterns: parseDenyPatterns(process.env.FS_DENY_FILE_PATTERNS),
+    denyPatterns,
     allowWrite:
       (process.env.FS_ALLOW_WRITE ?? "false").toLowerCase() === "true",
     maxReadBytes: parseIntEnv(

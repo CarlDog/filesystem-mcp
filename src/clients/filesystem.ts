@@ -323,19 +323,32 @@ export class FilesystemClient {
   async stat(inputPath: string): Promise<FileStat> {
     // Observe the path itself, without following a final symlink —
     // otherwise isSymlink/symlinkTarget could never be reported.
-    // Containment is still enforced: realpath+assert the PARENT
-    // directory, then lstat the basename joined onto its real form
-    // (same pattern as delete()'s symlink handling). Non-links get
-    // the full assertWithinRoots resolution as before.
+    // Containment is checked on the PARENT directory FIRST, via
+    // realpath, before any lstat touches the leaf. lstat'ing the raw
+    // leaf before containment is confirmed would leak whether an
+    // out-of-roots path exists: a raw ENOENT/EACCES propagating past
+    // the initial lstat is distinguishable from the generic "escapes
+    // FS_ROOTS" error thrown for a path whose leaf DOES exist — an
+    // existence/permission oracle for paths outside the configured
+    // roots. Every child of an in-roots parent is itself in-roots
+    // (barring the child being a symlink, handled below), so checking
+    // the parent alone is sufficient. Non-links get the full
+    // assertWithinRoots resolution as before.
     const targetAbs = path.resolve(inputPath);
-    const targetLstat = await fs.lstat(targetAbs);
+    let parentReal: string;
+    try {
+      parentReal = await fs.realpath(path.dirname(targetAbs));
+    } catch {
+      throw new Error(`path escapes configured FS_ROOTS: ${inputPath}`);
+    }
+    if (!this.isInRoots(parentReal)) {
+      throw new Error(`path escapes configured FS_ROOTS: ${inputPath}`);
+    }
+    const candidateReal = path.join(parentReal, path.basename(targetAbs));
+    const targetLstat = await fs.lstat(candidateReal);
     let real: string;
     if (targetLstat.isSymbolicLink()) {
-      const parentReal = await fs.realpath(path.dirname(targetAbs));
-      if (!this.isInRoots(parentReal)) {
-        throw new Error(`path escapes configured FS_ROOTS: ${inputPath}`);
-      }
-      real = path.join(parentReal, path.basename(targetAbs));
+      real = candidateReal;
     } else {
       real = await this.assertWithinRoots(inputPath);
     }
@@ -1034,15 +1047,25 @@ export class FilesystemClient {
 
     // Resolve the target. If it's a symlink, we MUST keep the symlink
     // path intact (otherwise we'd unlink the target file, not the link).
+    // Containment is checked on the PARENT directory FIRST, via
+    // realpath, before any lstat touches the leaf — see stat()'s
+    // matching comment for why an unguarded initial lstat is an
+    // existence/permission oracle for out-of-roots paths.
     const targetAbs = path.resolve(inputPath);
+    let parentReal: string;
+    try {
+      parentReal = await fs.realpath(path.dirname(targetAbs));
+    } catch {
+      throw new Error(`path escapes configured FS_ROOTS: ${inputPath}`);
+    }
+    if (!this.isInRoots(parentReal)) {
+      throw new Error(`path escapes configured FS_ROOTS: ${inputPath}`);
+    }
+    const candidateReal = path.join(parentReal, path.basename(targetAbs));
     let target: string;
-    const targetLstat = await fs.lstat(targetAbs);
+    const targetLstat = await fs.lstat(candidateReal);
     if (targetLstat.isSymbolicLink()) {
-      const parentReal = await fs.realpath(path.dirname(targetAbs));
-      if (!this.isInRoots(parentReal)) {
-        throw new Error(`path escapes configured FS_ROOTS: ${inputPath}`);
-      }
-      target = path.join(parentReal, path.basename(targetAbs));
+      target = candidateReal;
     } else {
       target = await this.assertWithinRoots(inputPath, true);
     }
