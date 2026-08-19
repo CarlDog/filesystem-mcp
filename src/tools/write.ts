@@ -1,7 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { FilesystemClient } from "../clients/filesystem.js";
-import { asText } from "../util.js";
+import { asJson } from "../shared/text.js";
+import { ANN_DESTRUCTIVE, ANN_EDIT } from "../shared/annotations.js";
+import { logged } from "./log-wrap.js";
 
 /**
  * Registers mutation MCP tools backed by FilesystemClient.
@@ -46,14 +48,16 @@ export function registerWriteTools(
             "Preview without performing the move. Default true — opt in to actual mutation per call by passing false.",
           ),
       },
+      annotations: ANN_DESTRUCTIVE,
     },
-    async ({ from, to, overwrite, dry_run }) =>
-      asText(
+    logged("fs_move", async ({ from, to, overwrite, dry_run }) =>
+      asJson(
         await fs.move(from, to, {
           overwrite,
           dryRun: dry_run,
         }),
       ),
+    ),
   );
 
   server.registerTool(
@@ -94,16 +98,23 @@ export function registerWriteTools(
             "Preview without copying anything. Default true — opt in to actual mutation per call by passing false.",
           ),
       },
+      // Same shape as fs_move: overwrite=true can replace (destroy) an
+      // existing file at the destination, so this carries the same
+      // destructiveHint despite never touching the source.
+      annotations: ANN_DESTRUCTIVE,
     },
-    async ({ from, to, recursive, dereference, overwrite, dry_run }) =>
-      asText(
-        await fs.copy(from, to, {
-          recursive,
-          dereference,
-          overwrite,
-          dryRun: dry_run,
-        }),
-      ),
+    logged(
+      "fs_copy",
+      async ({ from, to, recursive, dereference, overwrite, dry_run }) =>
+        asJson(
+          await fs.copy(from, to, {
+            recursive,
+            dereference,
+            overwrite,
+            dryRun: dry_run,
+          }),
+        ),
+    ),
   );
 
   server.registerTool(
@@ -135,15 +146,17 @@ export function registerWriteTools(
             "Belt-and-suspenders flag REQUIRED alongside dry_run=false to actually mutate. Default false. Two independent flags must agree before any irreversible delete is performed.",
           ),
       },
+      annotations: ANN_DESTRUCTIVE,
     },
-    async ({ path: p, recursive, dry_run, confirm }) =>
-      asText(
+    logged("fs_delete", async ({ path: p, recursive, dry_run, confirm }) =>
+      asJson(
         await fs.delete(p, {
           recursive,
           dryRun: dry_run,
           confirm,
         }),
       ),
+    ),
   );
 
   server.registerTool(
@@ -171,13 +184,15 @@ export function registerWriteTools(
             "Preview without creating anything. Default true — opt in to actual mutation per call by passing false.",
           ),
       },
+      annotations: ANN_EDIT,
     },
-    async ({ path: p, recursive, dry_run }) =>
-      asText(
+    logged("fs_mkdir", async ({ path: p, recursive, dry_run }) =>
+      asJson(
         await fs.mkdir(p, {
           recursive,
           dryRun: dry_run,
         }),
       ),
+    ),
   );
 }

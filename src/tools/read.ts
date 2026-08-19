@@ -1,7 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { FilesystemClient } from "../clients/filesystem.js";
-import { asText } from "../util.js";
+import { asJson } from "../shared/text.js";
+import { ANN_READ } from "../shared/annotations.js";
+import { logged } from "./log-wrap.js";
 
 /**
  * Registers the read-only MCP tools backed by FilesystemClient:
@@ -20,8 +22,9 @@ export function registerReadTools(
       description:
         "Return the list of absolute paths the MCP is allowed to operate on. Every other tool will refuse paths outside these roots (after symlink resolution). Use this first when you don't know what the user has exposed.",
       inputSchema: {},
+      annotations: ANN_READ,
     },
-    async () => asText(await fs.listRoots()),
+    logged("fs_list_roots", async () => asJson(await fs.listRoots())),
   );
 
   server.registerTool(
@@ -45,9 +48,11 @@ export function registerReadTools(
             "Cap on entries returned (also subject to FS_MAX_LIST_ENTRIES)",
           ),
       },
+      annotations: ANN_READ,
     },
-    async ({ path: p, max_entries }) =>
-      asText(await fs.listDirectory(p, { maxEntries: max_entries })),
+    logged("fs_list_directory", async ({ path: p, max_entries }) =>
+      asJson(await fs.listDirectory(p, { maxEntries: max_entries })),
+    ),
   );
 
   server.registerTool(
@@ -63,8 +68,9 @@ export function registerReadTools(
             "Absolute path to a file/dir/symlink inside one of the configured FS_ROOTS",
           ),
       },
+      annotations: ANN_READ,
     },
-    async ({ path: p }) => asText(await fs.stat(p)),
+    logged("fs_stat", async ({ path: p }) => asJson(await fs.stat(p))),
   );
 
   server.registerTool(
@@ -94,14 +100,16 @@ export function registerReadTools(
             "If true, read binary files (returned as base64). Default false — binary files are refused with an error so the caller can decide whether to pull them.",
           ),
       },
+      annotations: ANN_READ,
     },
-    async ({ path: p, max_bytes, force_binary }) =>
-      asText(
+    logged("fs_read_file", async ({ path: p, max_bytes, force_binary }) =>
+      asJson(
         await fs.readFile(p, {
           maxBytes: max_bytes,
           forceBinary: force_binary,
         }),
       ),
+    ),
   );
 
   server.registerTool(
@@ -132,13 +140,15 @@ export function registerReadTools(
             "Cap on matches returned (also clamped by FS_MAX_LIST_ENTRIES).",
           ),
       },
+      annotations: ANN_READ,
     },
-    async ({ pattern, path: p, max_results }) =>
-      asText(
+    logged("fs_find_by_glob", async ({ pattern, path: p, max_results }) =>
+      asJson(
         await fs.findByGlob(pattern, {
           startPath: p,
           maxResults: max_results,
         }),
       ),
+    ),
   );
 }

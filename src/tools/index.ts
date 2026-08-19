@@ -3,6 +3,9 @@ import type { FilesystemClient } from "../clients/filesystem.js";
 import { registerReadTools } from "./read.js";
 import { registerWriteTools } from "./write.js";
 
+/** Declared tool-name prefixes for this server — standard MCP-P01/T02. */
+export const TOOL_PREFIXES = ["fs"];
+
 export function registerFilesystemTools(
   server: McpServer,
   fs: FilesystemClient,
