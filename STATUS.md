@@ -1,6 +1,6 @@
 # Status
 
-**Last updated:** 2026-08-19
+**Last updated:** 2026-08-19 (fleet-standards migration complete, incl. live transport swap)
 
 ## Phase
 
@@ -48,17 +48,38 @@ Claude Code (user scope) and Claude Desktop config.
      `truncated` instead of an exact `total`, since computing one would
      require a full-tree walk); `docker-publish.yml`'s image build now
      `needs: test` so a red commit can't ship `:latest` (UNI-14).
-     Mechanized `standards_audit.py`: **22 pass, 1 fail** — only
-     `MCP-S01: missing http-transport.ts`, deliberately deferred (see
-     Known Gaps) since it requires swapping the hand-rolled Express/
-     `StreamableHTTPServerTransport` code in `src/index.ts`, a
-     higher-risk change queued as its own stage.
+     Mechanized `standards_audit.py`: 22 pass, 1 fail at this point —
+     only `MCP-S01: missing http-transport.ts`, deferred to its own
+     commit below since swapping the hand-rolled Express/
+     `StreamableHTTPServerTransport` code in `src/index.ts` is the
+     highest-risk change in the batch (it's the code actually serving
+     the live, `FS_ALLOW_WRITE=true` endpoint).
   - **CI catch worth noting:** the push that gated Publish on Test
     (`d89bf84`) itself broke Test — two symlink-only `fs_delete` tests
     (`it.skipIf` on Windows) were missing the new `confirm_name` param.
     Invisible on the Windows dev box; caught by CI's Linux/macOS legs.
     Fixed in `05a97cd`, re-verified green against the real run
     (`gh run list --json headSha,conclusion`), not assumed.
+  - **`http-transport.ts` swap, done live (`6368864`).** Ported the
+    canonical file + its enforcement test verbatim; `src/index.ts` now
+    uses `mountMcpHttp()` (fresh `McpServer` per session, idle-session
+    eviction, spec-correct 404 — not 400 — on an unknown session id).
+    `standards_audit.py`: **23 pass, 0 fail.** Two coordinated env
+    changes shipped with it: `MCP_ALLOWED_HOSTS` moved from
+    port-inclusive exact-match (`your-nas:3006`) to bare hostnames
+    (`your-nas`) — the canonical `hostAllowed()` strips the port and
+    lowercases, unlike the old SDK-native matcher; `MCP_BIND_HOST`
+    defaults to `0.0.0.0` in `docker-compose.yml` (the canonical
+    transport itself defaults to loopback-only, which would have
+    silently broken external reachability — both healthchecks run
+    from inside the container, so that failure is invisible from
+    Portainer's UI). Live on stack #152: confirmed
+    `org.opencontainers.image.revision` matches the pushed commit, and
+    empirically verified no-auth→401, wrong-token→401, correct
+    token+allowed Host (with and without an explicit port)→200,
+    disallowed Host→403, unknown session id→404. Full narrative,
+    including a Portainer git-stack auto-poller race worth remembering
+    for future redeploys, in OC memory `48b1d3d2-77fc-48b4-8171-a7bbcdd1fa1c`.
 - **Roots derivation + resilient startup (2026-05-29).** `FS_ROOTS` is
   now optional: when unset, roots default to the container-side targets
   of the `FS_VOLUME*` bind specs (`deriveRootsFromVolumes` in
@@ -223,17 +244,8 @@ the dev chat unless evidence shows them wrong):
 
 ## Known Gaps
 
-- Container logs returned by `tools/write.ts` stubs hard-code "not
-  implemented" — when the dev chat fills them in, replace those error
-  throws with real implementations. (Pre-existing note; `tools/write.ts`
-  is now fully implemented — this looks stale, verify before acting on it.)
-- **`src/shared/http-transport.ts` not yet adopted (MCP-S01/F03).** The
-  HTTP transport in `src/index.ts` is still hand-rolled Express +
-  `StreamableHTTPServerTransport`, not the fleet's canonical
-  `mountMcpHttp()`. Two landmines to account for when doing this swap:
-  the installed SDK (1.30.0) does an exact, case-sensitive, port-inclusive
-  Host-header match, while the canonical `hostAllowed()` strips the port
-  and lowercases — `MCP_ALLOWED_HOSTS` will need updating in lockstep;
-  and the canonical template defaults to a loopback bind vs. this repo's
-  current implicit `0.0.0.0`. Tracked in OpenChronicle memory
-  `48b1d3d2-77fc-48b4-8171-a7bbcdd1fa1c` on the filesystem-mcp project.
+None active as of the 2026-08-19 fleet-standards migration —
+mechanized `standards_audit.py` reports 23/23 passing. (A stale note
+about `tools/write.ts` stubs hard-coding "not implemented" lived here
+previously; removed — all four write tools have been fully implemented
+since 2026-05-04, see Done above.)
