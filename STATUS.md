@@ -1,6 +1,6 @@
 # Status
 
-**Last updated:** 2026-05-29
+**Last updated:** 2026-08-19
 
 ## Phase
 
@@ -22,6 +22,43 @@ Claude Code (user scope) and Claude Desktop config.
 
 ## Done
 
+- **HTTP auth + fleet-standards migration (2026-08-19).** Two staged
+  efforts, both fully committed/pushed/CI-green on `main`:
+  1. `MCP_AUTH_TOKEN` bearer auth (SHA-256 + `timingSafeEqual`) gating
+     every `/mcp` request (`/health` stays ungated) plus a real
+     `MCP_ALLOWED_HOSTS` `${VAR:-}` compose substitution — closes the
+     highest-severity open dogfooding note (unauthenticated HTTP
+     endpoint with live `FS_ALLOW_WRITE=true`). Live on Portainer
+     stack #152; verified empirically (401/401/200/403). Real secret
+     values live only in Portainer's stack env, never committed.
+  2. Brought the repo up to the fleet's `ts-mcp-server` standard
+     (`claude-fleet-kit`) in 8 staged commits: `.editorconfig` +
+     Dockerfile `HEALTHCHECK` + canonical pre-commit hook; a real
+     security fix (`fs_stat`/`fs_delete` did `lstat` before the
+     containment check — an existence/permission oracle — now
+     containment-checks the parent first); ported the canonical
+     `src/shared/*.ts` files (MCP-S01, `http-transport.ts` excluded —
+     see below); tool annotations + arg-only logging + JSON content
+     redaction on all 9 tools; `confirm_name` required on `fs_move`/
+     `fs_copy`/`fs_delete` before an overwrite or delete actually
+     mutates (MCP-P06); `fs_list_directory`/`fs_find_by_glob` rewritten
+     from `max_entries`/`max_results` to `{offset, limit}` →
+     `{total, offset, size, items}` pagination, throwing (not clamping)
+     past the configured max (MCP-P03; `fs_find_by_glob` reports
+     `truncated` instead of an exact `total`, since computing one would
+     require a full-tree walk); `docker-publish.yml`'s image build now
+     `needs: test` so a red commit can't ship `:latest` (UNI-14).
+     Mechanized `standards_audit.py`: **22 pass, 1 fail** — only
+     `MCP-S01: missing http-transport.ts`, deliberately deferred (see
+     Known Gaps) since it requires swapping the hand-rolled Express/
+     `StreamableHTTPServerTransport` code in `src/index.ts`, a
+     higher-risk change queued as its own stage.
+  - **CI catch worth noting:** the push that gated Publish on Test
+    (`d89bf84`) itself broke Test — two symlink-only `fs_delete` tests
+    (`it.skipIf` on Windows) were missing the new `confirm_name` param.
+    Invisible on the Windows dev box; caught by CI's Linux/macOS legs.
+    Fixed in `05a97cd`, re-verified green against the real run
+    (`gh run list --json headSha,conclusion`), not assumed.
 - **Roots derivation + resilient startup (2026-05-29).** `FS_ROOTS` is
   now optional: when unset, roots default to the container-side targets
   of the `FS_VOLUME*` bind specs (`deriveRootsFromVolumes` in
@@ -188,4 +225,15 @@ the dev chat unless evidence shows them wrong):
 
 - Container logs returned by `tools/write.ts` stubs hard-code "not
   implemented" — when the dev chat fills them in, replace those error
-  throws with real implementations.
+  throws with real implementations. (Pre-existing note; `tools/write.ts`
+  is now fully implemented — this looks stale, verify before acting on it.)
+- **`src/shared/http-transport.ts` not yet adopted (MCP-S01/F03).** The
+  HTTP transport in `src/index.ts` is still hand-rolled Express +
+  `StreamableHTTPServerTransport`, not the fleet's canonical
+  `mountMcpHttp()`. Two landmines to account for when doing this swap:
+  the installed SDK (1.30.0) does an exact, case-sensitive, port-inclusive
+  Host-header match, while the canonical `hostAllowed()` strips the port
+  and lowercases — `MCP_ALLOWED_HOSTS` will need updating in lockstep;
+  and the canonical template defaults to a loopback bind vs. this repo's
+  current implicit `0.0.0.0`. Tracked in OpenChronicle memory
+  `48b1d3d2-77fc-48b4-8171-a7bbcdd1fa1c` on the filesystem-mcp project.
