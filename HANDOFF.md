@@ -1,5 +1,11 @@
 # filesystem-mcp — handoff to development chat
 
+> **Historical.** This was the build briefing for the original
+> scaffold → feature-complete push; every item below has shipped
+> (see STATUS.md). Kept for the design rationale and acceptance
+> criteria, not as a current-state doc — for what's done, decided,
+> and next, read [STATUS.md](STATUS.md).
+
 You're picking this up cold. Read this in full before touching code.
 The scaffold is solid; design decisions have been made; what's left is
 mostly mechanical — but the safety story matters, so the *how* of each
