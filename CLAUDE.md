@@ -98,6 +98,15 @@ docker build -t filesystem-mcp .
 
 ## Conventions
 
+- **`package.json` is `private: true` — deliberate, not an oversight.**
+  The unscoped npm name `filesystem-mcp` belongs to an unrelated package
+  (Adam Jones / `domdomegg`), so this project can never publish under it,
+  while `bin` + `files: ["dist"]` advertised a publishable shape. This
+  server is distributed as a container (`ghcr.io/carldog/filesystem-mcp`)
+  — there is no publish workflow and no `NPM_TOKEN`. `private: true` makes
+  the config honest and blocks an accidental publish. Reversible in one
+  line if a scoped name is adopted.
+
 - All logging goes to **stderr** (`console.error`). stdout is the MCP
   wire protocol.
 - Tool names: `fs_<verb_noun>` (e.g. `fs_list_directory`,

@@ -1,6 +1,7 @@
 {
   "name": "filesystem-mcp",
   "version": "0.1.0",
+  "private": true,
   "license": "MIT",
   "description": "MCP server exposing scoped filesystem operations (list, stat, read, glob, and optional move/copy/delete) for media library organization and similar use cases. Path-whitelisted, deny-pattern-aware, dry-run-by-default writes.",
   "type": "module",
