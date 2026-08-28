@@ -1,5 +1,5 @@
 {
-  "name": "filesystem-mcp",
+  "name": "@carldog/filesystem-mcp",
   "version": "0.1.0",
   "private": true,
   "license": "MIT",

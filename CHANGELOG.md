@@ -12,6 +12,15 @@ after the fact.
 
 ## [Unreleased]
 
+### Changed
+
+- **Package renamed to `@carldog/filesystem-mcp`.** The unscoped name
+  `filesystem-mcp` is owned by an unrelated package (Adam Jones /
+  `domdomegg`), so it was never available; a scope is reserved to the
+  account, so no name inside it can be taken. Nothing is published to npm -
+  this ships as a container - so the rename is invisible to consumers;
+  `package-lock.json` was regenerated with it.
+
 ## [0.1.0] - 2026-08-28
 
 First tagged release. Feature-complete and deployed as stack #152 on the NAS.
