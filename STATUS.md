@@ -1,6 +1,17 @@
 # Status
 
-**Last updated:** 2026-08-19 (fleet-standards migration complete, incl. live transport swap)
+**Last updated:** 2026-08-28 — **released v0.1.0**, this repo's first tagged
+release, under the new fleet standard UNI-19 (public releases have a staleness
+bound). Adds the backfilled `CHANGELOG.md` UNI-12 requires, and sets
+`flavor: latest=false` on `docker-publish.yml` so the release tag publishes
+`0.1.0` and `0.1` without republishing `:latest` — left at
+`docker/metadata-action`'s `latest=auto` default, a `v*` tag rebuilds the same
+commit at a new digest and bounces the live stack for nothing. Released at the
+manifest version rather than graduating to 1.0.0; that stays a separate,
+deliberate decision.
+
+Previous entry, 2026-08-19: fleet-standards migration complete, incl. live
+transport swap.
 
 ## Phase
 
