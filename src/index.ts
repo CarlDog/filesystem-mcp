@@ -198,11 +198,13 @@ if (baseConfig.port === undefined) {
 } else {
   if (!baseConfig.allowedHosts || baseConfig.allowedHosts.length === 0) {
     log.warn(
-      "MCP_ALLOWED_HOSTS is unset — DNS-rebinding protection is OFF. " +
-        "Recommended: set it to the bare hostnames clients use to reach " +
-        "this server (e.g. your NAS hostname and host.docker.internal) — " +
-        "no port. Host headers are matched case-insensitively with the " +
-        "port stripped.",
+      "MCP_ALLOWED_HOSTS is unset — falling back to " +
+        "localhost,127.0.0.1,[::1],host.docker.internal, which rejects a " +
+        "real LAN client. Recommended: set it to the bare hostnames " +
+        "clients use to reach this server (e.g. your NAS hostname and " +
+        "host.docker.internal) — no port. Host headers are matched " +
+        "case-insensitively, independent of port, with bracketed IPv6 " +
+        "supported.",
     );
   }
   if (!baseConfig.authToken) {

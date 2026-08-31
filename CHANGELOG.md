@@ -14,6 +14,17 @@ after the fact.
 
 ### Changed
 
+- **`MCP_ALLOWED_HOSTS` matching now handles bracketed IPv6 correctly.**
+  `hostAllowed()` split the incoming Host header at the first colon, turning
+  `[::1]:3006` into the mangled `[` — bracketed IPv6 could never match. Host
+  matching now delegates to the canonical `src/shared/mcp-environment.ts`
+  (`parseAllowedHosts`/`requestAuthorityAllowed`, ported from the
+  claude-fleet-kit `ts-mcp-server` template, previously present only in
+  kindroid-mcp) instead of the ad hoc split-based check. A behavior change
+  worth naming: when `MCP_ALLOWED_HOSTS` is unset, the allowlist now falls
+  back to `localhost,127.0.0.1,[::1],host.docker.internal` rather than being
+  fully open — the canonical module's default is safe-by-default, not
+  open-by-default. Startup warning and README updated to match.
 - **Package renamed to `@carldog/filesystem-mcp`.** The unscoped name
   `filesystem-mcp` is owned by an unrelated package (Adam Jones /
   `domdomegg`), so it was never available; a scope is reserved to the
