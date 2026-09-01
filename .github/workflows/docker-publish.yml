@@ -21,6 +21,8 @@ on:
       - ".vscode/**"
       - ".env.example"
       - ".gitattributes"
+      - ".githooks/**"
+      - ".gitleaks.toml"
   pull_request:
     branches: [main]
 
