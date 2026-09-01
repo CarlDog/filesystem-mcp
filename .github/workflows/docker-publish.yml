@@ -35,6 +35,9 @@ env:
   # claude-fleet-kit fleet/lessons/npm-version-skew.
   PINNED_NPM: "11.19.0"
 
+permissions:
+  contents: read
+
 jobs:
   # Gate. Publishing depends on this passing.
   test:
