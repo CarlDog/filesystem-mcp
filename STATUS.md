@@ -1,5 +1,17 @@
 # Status
 
+**Local fix prepared (2026-10-26):** issue #42, nested symlink containment
+for `fs_copy` with `dereference=true`. Preflight now validates each source
+path before counting/traversing, rejects cycles and counts directory aliases
+as separate copies. Execution rechecks containment, deny patterns and limits;
+destination checks also refuse dangling links. Symlink-preserving copy
+behavior is unchanged. This is local work awaiting review and integration;
+publication, deployment and live acceptance have not been performed.
+Offline Linux validation: all 174 tests pass, including 28 new containment
+regressions; the six core escape/deny cases fail against the unchanged
+original source. Windows: 134 pass, 40 symlink cases skip. Typecheck, build,
+lint and format checks pass. Independent source review found no blockers.
+
 **Last updated:** 2026-08-28 — **released v0.1.0**, this repo's first tagged
 release, under the new fleet standard UNI-19 (public releases have a staleness
 bound). Adds the backfilled `CHANGELOG.md` UNI-12 requires, and sets
@@ -255,8 +267,14 @@ the dev chat unless evidence shows them wrong):
 
 ## Known Gaps
 
-None active as of the 2026-08-19 fleet-standards migration —
-mechanized `standards_audit.py` reports 23/23 passing. (A stale note
+`fs_copy` still uses path-based Node APIs: a concurrent process can change
+paths after validation and before I/O. The issue #42 fix rechecks at each
+copy entry but does not provide atomic containment against hostile concurrent
+mutation. A refusal during execution can leave a partial destination; copy
+is not transactional. Regression checks use temporary dummy fixtures only.
+
+Historical baseline from the 2026-08-19 fleet-standards migration:
+mechanized `standards_audit.py` reported 23/23 passing. (A stale note
 about `tools/write.ts` stubs hard-coding "not implemented" lived here
 previously; removed — all four write tools have been fully implemented
 since 2026-05-04, see Done above.)
