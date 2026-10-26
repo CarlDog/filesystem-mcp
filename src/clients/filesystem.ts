@@ -860,7 +860,8 @@ export class FilesystemClient {
    *
    * Symlinks: by default copied AS symlinks (link itself is duplicated,
    * target untouched). With dereference=true, the target is followed
-   * and a real copy is produced.
+   * and a real copy is produced. Every dereferenced entry must remain
+   * inside FS_ROOTS and pass the deny patterns, including during copy.
    */
   async copy(
     fromInput: string,
@@ -897,9 +898,12 @@ export class FilesystemClient {
     } else {
       from = await this.assertWithinRoots(fromInput, true);
     }
+    if (dereference) this.assertNotDenied(path.basename(fromAbs));
     this.assertNotDenied(path.basename(from));
 
-    const to = await this.assertWithinRoots(toInput, false);
+    const to = dereference
+      ? await this.assertCopyDestination(toInput)
+      : await this.assertWithinRoots(toInput, false);
     this.assertNotDenied(path.basename(to));
 
     // Inspect source — refuse non-recursive copy of a directory.
@@ -952,12 +956,23 @@ export class FilesystemClient {
     this.assertCopyTreeSizeOK(summary, "fs_copy");
 
     if (!dryRun) {
+      // Revalidate every entry when fs.cp visits it: preflight alone
+      // misses links replaced or entries added after assessment. This
+      // narrows, but cannot eliminate, path-check-to-I/O races in fs.cp.
+      const guard = dereference ? this.createDereferenceCopyGuard() : null;
       await fs.cp(from, to, {
         recursive,
         dereference,
         force: overwrite,
         errorOnExist: !overwrite,
         preserveTimestamps: true,
+        filter: guard
+          ? async (source, destination) => {
+              await guard.check(source);
+              await this.assertCopyDestination(destination);
+              return true;
+            }
+          : undefined,
       });
     }
 
@@ -971,6 +986,73 @@ export class FilesystemClient {
       would_overwrite: wouldOverwrite,
       files_to_copy: summary.entries,
       bytes_to_copy: summary.bytes,
+    };
+  }
+
+  /** Check both the name being copied and the final resolved target. */
+  private async assertDereferenceCopyPath(inputPath: string): Promise<string> {
+    const real = await this.assertWithinRoots(inputPath);
+    if (
+      this.basenameMatchesDeny(path.basename(inputPath)) ||
+      this.basenameMatchesDeny(path.basename(real))
+    ) {
+      throw new Error(
+        `fs_copy path matches FS_DENY_FILE_PATTERNS: ${inputPath}`,
+      );
+    }
+    return real;
+  }
+
+  private async assertCopyDestination(inputPath: string): Promise<string> {
+    const real = await this.assertWithinRoots(inputPath, false);
+    // A dangling destination link must not be mistaken for a missing
+    // path: copyFile would follow it and could create an outside file.
+    // Walk missing parents too, since fs.cp can create them recursively.
+    let existing = path.resolve(inputPath);
+    while (true) {
+      let st;
+      try {
+        st = await fs.lstat(existing);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+        const parent = path.dirname(existing);
+        if (parent === existing) throw err;
+        existing = parent;
+        continue;
+      }
+      if (st.isSymbolicLink()) await this.assertDereferenceCopyPath(existing);
+      break;
+    }
+    this.assertNotDenied(path.basename(inputPath));
+    this.assertNotDenied(path.basename(real));
+    return real;
+  }
+
+  /** Fresh state for each walk: aliases count separately, cycles refuse. */
+  private createDereferenceCopyGuard() {
+    const summary = { entries: 0, bytes: 0, truncated: false };
+    const ancestors = new Map<string, Set<string>>();
+    return {
+      summary,
+      check: async (source: string) => {
+        const real = await this.assertDereferenceCopyPath(source);
+        // Use the validated canonical path, not the symlink, for stat.
+        const st = await fs.stat(real);
+        summary.entries++;
+        if (st.isFile()) summary.bytes += st.size;
+        this.assertCopyTreeSizeOK(summary, "fs_copy");
+        if (st.isDirectory()) {
+          const parents =
+            ancestors.get(path.dirname(source)) ?? new Set<string>();
+          if (parents.has(real)) {
+            throw new Error(
+              `fs_copy refuses a symlink directory cycle: ${source}`,
+            );
+          }
+          ancestors.set(source, new Set([...parents, real]));
+        }
+        return { real, st };
+      },
     };
   }
 
@@ -990,12 +1072,27 @@ export class FilesystemClient {
     byteCap: number,
     dereference: boolean,
   ): Promise<{ entries: number; bytes: number; truncated: boolean }> {
+    if (dereference) {
+      const guard = this.createDereferenceCopyGuard();
+      const queue = [from];
+      while (queue.length > 0) {
+        const source = queue.shift()!;
+        const { real, st } = await guard.check(source);
+        if (st.isDirectory()) {
+          // Fail closed on broken links / unreadable or vanished paths.
+          // Do not return a partial preview which fs.cp would later exceed.
+          for (const name of await fs.readdir(real)) {
+            queue.push(path.join(source, name));
+          }
+        }
+      }
+      return guard.summary;
+    }
+
     let entries: number;
     let bytes = 0;
 
-    const initialStat = dereference
-      ? await fs.stat(from)
-      : await fs.lstat(from);
+    const initialStat = await fs.lstat(from);
 
     if (!initialStat.isDirectory()) {
       // Regular file or symlink leaf — single-entry copy.
@@ -1019,7 +1116,7 @@ export class FilesystemClient {
       }
       const dir = queue.shift()!;
 
-      // Cycle protection (matters when dereferencing).
+      // Avoid revisiting directories in the non-dereferencing walk.
       try {
         const real = await fs.realpath(dir);
         if (visited.has(real)) continue;
@@ -1043,18 +1140,7 @@ export class FilesystemClient {
         const full = path.join(dir, ent.name);
 
         if (ent.isSymbolicLink()) {
-          if (!dereference) continue; // symlink itself: no bytes
-          let target;
-          try {
-            target = await fs.stat(full); // follows link
-          } catch {
-            continue;
-          }
-          if (target.isFile()) {
-            bytes += target.size;
-          } else if (target.isDirectory()) {
-            queue.push(full);
-          }
+          continue; // symlink itself: no bytes
         } else if (ent.isFile()) {
           try {
             const st = await fs.lstat(full);

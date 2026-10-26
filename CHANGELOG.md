@@ -12,6 +12,18 @@ after the fact.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`fs_copy` dereference containment (#42).** Check every source entry
+  against `FS_ROOTS` and deny patterns before counting or traversing it,
+  then recheck source and destination paths during `fs.cp`. Reject broken
+  links, directory cycles and dangling destination links; count repeated
+  directory aliases separately and enforce copy limits during execution.
+  Symlink-preserving copies keep their existing behavior. These path-based
+  checks narrow the race window; they cannot prevent concurrent filesystem
+  changes between validation and Node's I/O, and a late refusal can leave a
+  partial destination.
+
 ### Changed
 
 - **`MCP_ALLOWED_HOSTS` matching now handles bracketed IPv6 correctly.**
