@@ -6,8 +6,8 @@ import { buildFixture, makeClient, mkSandbox, rmSandbox } from "./sandbox.js";
 const skipSymlinks = process.platform === "win32";
 
 /**
- * Observe names actually consumed by the traversal, through either directory
- * API. Watching only eventual refusal misses eager enumeration and queue growth.
+ * Observe names allocated by a listing or yielded by a stream. Counting only
+ * iteration misses an eager readdir allocation even when enqueueing is bounded.
  * Wrappers delegate to real temporary directories and preserve iterator cleanup.
  */
 function observeEnumeration(handles: Dir[]) {
@@ -17,15 +17,7 @@ function observeEnumeration(handles: Dir[]) {
     ...args: Parameters<typeof fs.readdir>
   ) => {
     const entries = await readdir(...args);
-    const iterate = entries[Symbol.iterator].bind(entries);
-    Object.defineProperty(entries, Symbol.iterator, {
-      value: function* () {
-        for (const entry of iterate()) {
-          observation.yielded++;
-          yield entry;
-        }
-      },
-    });
+    observation.yielded += entries.length;
     return entries;
   }) as typeof fs.readdir);
 

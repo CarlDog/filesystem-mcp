@@ -26,6 +26,10 @@ error-only assertion would miss the original defect. One additional child
 name is observed to prove overflow, but it is never enqueued. The cap bounds
 processed plus queued paths, not total bytes of process memory: directory
 buffering, path lengths and the guard's ancestry sets also consume space.
+Count an eager `readdir` result's entire length when it resolves, not only
+names subsequently consumed. Otherwise bounded enqueueing could hide an
+unbounded listing allocation. A premerge automated review exposed this second
+observer gap; validate it with eager enumeration while retaining reservations.
 Queue shifting and copied ancestry sets have costs tied to entry count and
 depth. These small fixtures do not establish process RSS or latency limits.
 Path checks still cannot eliminate concurrent validation-to-I/O races.
