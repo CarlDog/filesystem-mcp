@@ -1,12 +1,29 @@
 # Status
 
-**Local fix prepared (2026-10-26):** issue #42, nested symlink containment
+**Local queue-budget follow-up (2026-10-26):** review of #43 found that
+dereferenced preflight bounded consumed entries but could enqueue too many
+pending paths first. This local follow-up reserves processed + pending work
+before each enqueue and streams directory entries. It has not been published
+or deployed. The #42 containment fix remains deployed at merge `d8a5ead`;
+the queue finding is a source-supported resource risk, not a measured outage.
+See [tests/README.md](tests/README.md) for the missed invariant and coverage
+lesson. The entry cap is not a byte-level memory limit; ancestry bookkeeping
+also depends on depth. Validation results for this follow-up are recorded below.
+Offline Linux: all 184 tests pass, including the original 28 containment
+cases and 10 new budget cases. Six budget regressions fail against `d8a5ead`
+(40 names consumed versus cap 8; 44 versus cap 12); exact-limit controls
+already pass there. Windows: 140 pass, 44 symlink cases skip. Typecheck,
+build, lint and formatting pass on both platforms. Independent review
+explicitly checked resource bounds, exact-limit behavior and handle closure.
+
+**Original containment fix (2026-10-26):** issue #42, nested symlink containment
 for `fs_copy` with `dereference=true`. Preflight now validates each source
 path before counting/traversing, rejects cycles and counts directory aliases
 as separate copies. Execution rechecks containment, deny patterns and limits;
 destination checks also refuse dangling links. Symlink-preserving copy
-behavior is unchanged. This is local work awaiting review and integration;
-publication, deployment and live acceptance have not been performed.
+behavior is unchanged. Merged in #43 and deployed at `d8a5ead`, with matching
+running image identity and two successful health probes, zero restarts, and
+configuration preserved. No live exploit tests were performed.
 Offline Linux validation: all 174 tests pass, including 28 new containment
 regressions; the six core escape/deny cases fail against the unchanged
 original source. Windows: 134 pass, 40 symlink cases skip. Typecheck, build,
