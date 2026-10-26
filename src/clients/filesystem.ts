@@ -1081,8 +1081,19 @@ export class FilesystemClient {
         if (st.isDirectory()) {
           // Fail closed on broken links / unreadable or vanished paths.
           // Do not return a partial preview which fs.cp would later exceed.
-          for (const name of await fs.readdir(real)) {
-            queue.push(path.join(source, name));
+          // Budget discovered work, not only paths already consumed.
+          // Stream names so a wide directory cannot allocate an entire
+          // listing or an oversized pending queue before the refusal.
+          for await (const ent of await fs.opendir(real)) {
+            this.assertCopyTreeSizeOK(
+              {
+                entries: guard.summary.entries + queue.length + 1,
+                bytes: guard.summary.bytes,
+                truncated: false,
+              },
+              "fs_copy",
+            );
+            queue.push(path.join(source, ent.name));
           }
         }
       }

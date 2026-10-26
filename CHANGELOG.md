@@ -14,6 +14,10 @@ after the fact.
 
 ### Fixed
 
+- **Bound dereferenced copy preflight discovery (#43 follow-up).** Reserve
+  processed and pending paths against the entry cap before enqueueing each
+  child, and stream directory entries so wide trees and repeated directory
+  aliases cannot build an oversized frontier before refusal.
 - **`fs_copy` dereference containment (#42).** Check every source entry
   against `FS_ROOTS` and deny patterns before counting or traversing it,
   then recheck source and destination paths during `fs.cp`. Reject broken
